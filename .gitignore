@@ -1,0 +1,16 @@
+# Lokale Projektdokumentation
+CLAUDE.md
+
+# Dependencies
+node_modules/
+
+# Build-Output
+dist/
+
+# Lokale Daten und Cache
+data/
+*.feather
+
+# OS
+.DS_Store
+Thumbs.db
