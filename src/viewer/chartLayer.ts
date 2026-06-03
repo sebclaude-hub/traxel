@@ -35,6 +35,12 @@ export function makeChartLayer(
     data: [{ position: [mesh.anchor[0], mesh.anchor[1], 0] }],
     mesh: deckMesh,
     texture: image,
+    // clamp-to-edge: UV ausserhalb [0,1] (bei gedrehten Karten) sampelt den
+    // transparenten 1px-Rand des Bildes → ausserhalb des Rechtecks transparent.
+    textureParameters: {
+      addressModeU: "clamp-to-edge",
+      addressModeV: "clamp-to-edge",
+    },
     getPosition: (d) => d.position,
     getColor: TINT,
     material: false,

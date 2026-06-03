@@ -38,16 +38,6 @@ const Z_LIFT_SUBGRID_M = 0.0;
 // automatisch mit zScale waechst und das Terrain nicht zwischen den (anders
 // triangulierten) Vertices durchstoesst. 8 m sind auf grossen Karten unsichtbar.
 const Z_LIFT_BILINEAR_RAW_M = 8.0;
-const AXIS_ALIGN_EPS_DEG = 1e-6;
-
-function isAxisAligned(chart: ChartOverlay): boolean {
-  return (
-    Math.abs(chart.corner_tl[1] - chart.corner_tr[1]) < AXIS_ALIGN_EPS_DEG &&
-    Math.abs(chart.corner_bl[1] - chart.corner_br[1]) < AXIS_ALIGN_EPS_DEG &&
-    Math.abs(chart.corner_tl[0] - chart.corner_bl[0]) < AXIS_ALIGN_EPS_DEG &&
-    Math.abs(chart.corner_tr[0] - chart.corner_br[0]) < AXIS_ALIGN_EPS_DEG
-  );
-}
 
 function metersPerDegree(latCenterDeg: number): { mpLon: number; mpLat: number } {
   return {
@@ -62,10 +52,16 @@ function buildFromTerrainSubgrid(
   altBase: number,
   zScale: number,
 ): ChartMesh | null {
-  const lon_min = Math.min(chart.corner_tl[0], chart.corner_bl[0]);
-  const lon_max = Math.max(chart.corner_tr[0], chart.corner_br[0]);
-  const lat_min = Math.min(chart.corner_bl[1], chart.corner_br[1]);
-  const lat_max = Math.max(chart.corner_tl[1], chart.corner_tr[1]);
+  // Achsenparallele Bounding-Box ueber ALLE vier Ecken (auch fuer gedrehte
+  // Karten korrekt). Der Subgrid deckt die Box ab; ausserhalb des gedrehten
+  // Rechtecks liegende Vertices bekommen UV ausserhalb [0,1] und werden dank
+  // Transparenzrand des Bildes (clamp-to-edge) transparent gerendert.
+  const lons = [chart.corner_tl[0], chart.corner_tr[0], chart.corner_bl[0], chart.corner_br[0]];
+  const lats = [chart.corner_tl[1], chart.corner_tr[1], chart.corner_bl[1], chart.corner_br[1]];
+  const lon_min = Math.min(...lons);
+  const lon_max = Math.max(...lons);
+  const lat_min = Math.min(...lats);
+  const lat_max = Math.max(...lats);
 
   const dem_dlat = (demGrid.lat_max - demGrid.lat_min) / Math.max(demGrid.n_rows - 1, 1);
   const dem_dlon = (demGrid.lon_max - demGrid.lon_min) / Math.max(demGrid.n_cols - 1, 1);
@@ -88,6 +84,24 @@ function buildFromTerrainSubgrid(
   const lat_center = (demGrid.lat_min + demGrid.lat_max) / 2;
   const { mpLon, mpLat } = metersPerDegree(lat_center);
 
+  // UV aus den Eckkoordinaten (Parallelogramm-Inverse) — funktioniert fuer
+  // jede Rotation/Skalierung: u laeuft entlang tl→tr, v entlang tl→bl.
+  const cLat = (lats[0] + lats[1] + lats[2] + lats[3]) / 4;
+  const cLon = (lons[0] + lons[1] + lons[2] + lons[3]) / 4;
+  const mLat = 110540;
+  const mLon = 111320 * Math.cos((cLat * Math.PI) / 180);
+  const toM = (lon: number, lat: number): [number, number] => [
+    (lon - cLon) * mLon,
+    (lat - cLat) * mLat,
+  ];
+  const tlM = toM(chart.corner_tl[0], chart.corner_tl[1]);
+  const trM = toM(chart.corner_tr[0], chart.corner_tr[1]);
+  const blM = toM(chart.corner_bl[0], chart.corner_bl[1]);
+  const ax: [number, number] = [trM[0] - tlM[0], trM[1] - tlM[1]];
+  const ay: [number, number] = [blM[0] - tlM[0], blM[1] - tlM[1]];
+  const ax2 = ax[0] * ax[0] + ax[1] * ax[1] || 1;
+  const ay2 = ay[0] * ay[0] + ay[1] * ay[1] || 1;
+
   const positions = new Float32Array(N_rows * N_cols * 3);
   const texCoords = new Float32Array(N_rows * N_cols * 2);
   let pIdx = 0;
@@ -102,8 +116,12 @@ function buildFromTerrainSubgrid(
       positions[pIdx++] = (lon - lon_center) * mpLon;
       positions[pIdx++] = (lat - lat_center) * mpLat;
       positions[pIdx++] = altBase + (elev - altBase) * zScale + Z_LIFT_SUBGRID_M;
-      texCoords[tIdx++] = (lon - lon_min) / (lon_max - lon_min);
-      texCoords[tIdx++] = (lat_max - lat) / (lat_max - lat_min);
+
+      const pm = toM(lon, lat);
+      const relx = pm[0] - tlM[0];
+      const rely = pm[1] - tlM[1];
+      texCoords[tIdx++] = (relx * ax[0] + rely * ax[1]) / ax2;
+      texCoords[tIdx++] = (relx * ay[0] + rely * ay[1]) / ay2;
     }
   }
 
@@ -236,7 +254,10 @@ export function buildChartMesh(
   zScale = 1,
   subdivision?: number | null,
 ): ChartMesh {
-  if (demGrid && isAxisAligned(chart) && subdivision == null && chart.subdivision == null) {
+  // Mit DEM IMMER (auch gedreht) den Terrain-Subgrid nutzen: identische
+  // Vertices und Triangulation wie das Terrain → kein Durchstoßen moeglich.
+  // Bilinear nur ohne DEM oder bei erzwungener Subdivision.
+  if (demGrid && subdivision == null && chart.subdivision == null) {
     const meshA = buildFromTerrainSubgrid(chart, demGrid, altBase, zScale);
     if (meshA) return meshA;
   }

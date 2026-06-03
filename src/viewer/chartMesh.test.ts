@@ -49,6 +49,41 @@ describe("buildChartMesh", () => {
     expect(mesh.positions[2]).toBeCloseTo(300, 3);
   });
 
+  it("gedrehte Karte nutzt mit DEM den Terrain-Subgrid (Z = Terrain, UV ueberlaeuft)", () => {
+    // Feines flaches DEM (11x11 @ 100 m), damit der Subgrid genug Vertices hat.
+    const fine: DemGrid = {
+      n_rows: 11,
+      n_cols: 11,
+      lat_min: 0,
+      lat_max: 1,
+      lon_min: 0,
+      lon_max: 1,
+      elevations: new Array(121).fill(100),
+    };
+    // 45°-Raute (gedrehtes Quadrat) zentriert bei (0.5, 0.5).
+    const rotated: ChartOverlay = {
+      name: "r",
+      corner_tl: [0.5, 0.7],
+      corner_tr: [0.7, 0.5],
+      corner_bl: [0.3, 0.5],
+      corner_br: [0.5, 0.3],
+      elevation_m: 0,
+    };
+    const mesh = buildChartMesh(rotated, fine, 0, 1);
+    // Vertex-Z folgt exakt dem Terrain (kein Lift-Float) → Durchstoßen unmoeglich.
+    for (let i = 2; i < mesh.positions.length; i += 3) {
+      expect(mesh.positions[i]).toBeCloseTo(100, 3);
+    }
+    // Bounding-Box-Ecken liegen ausserhalb der Raute → UV laeuft ueber [0,1].
+    let maxUV = -Infinity;
+    let minUV = Infinity;
+    for (const t of mesh.texCoords) {
+      if (t > maxUV) maxUV = t;
+      if (t < minUV) minUV = t;
+    }
+    expect(maxUV > 1 || minUV < 0).toBe(true);
+  });
+
   it("texCoords decken im bilinearen Pfad den Bereich [0,1] ab", () => {
     // Ohne DEM → Strategie B (Ecken), u/v laufen exakt 0..1.
     const mesh = buildChartMesh(axisAlignedChart(), null, 0, 1);

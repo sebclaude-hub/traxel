@@ -138,13 +138,23 @@ export default function App() {
         setError("Erst einen Track laden, dann eine Karte hinzufügen.");
         return;
       }
-      const image = await createImageBitmap(file);
+      // 1px transparenter Rand: bei gedrehten Karten liegen Mesh-Vertices auch
+      // ausserhalb des Rechtecks; mit clamp-to-edge sampeln sie diesen Rand →
+      // transparent statt verschmiert. Der ~0,4%-Inhaltsversatz ist unsichtbar.
+      const src = await createImageBitmap(file);
+      const pad = 1;
+      const cv = document.createElement("canvas");
+      cv.width = src.width + pad * 2;
+      cv.height = src.height + pad * 2;
+      cv.getContext("2d")!.drawImage(src, pad, pad);
+      const image = await createImageBitmap(cv);
+      src.close();
       const b = track.meta.bounds;
       const centerLon = (b.lon_min + b.lon_max) / 2;
       const centerLat = (b.lat_min + b.lat_max) / 2;
       const mpLon = 111320 * Math.cos(centerLat * DEG2RAD);
       const bboxW = (b.lon_max - b.lon_min) * mpLon;
-      const widthM = Math.max(300, bboxW * 0.5 || 1000);
+      const widthM = Math.max(300, bboxW * 0.3 || 1000);
       const heightM = widthM * (image.height / Math.max(image.width, 1));
       setCharts((cs) => [
         ...cs,
