@@ -1,47 +1,50 @@
 // ---------------------------------------------------------------------------
 // Pipeline-Web-Worker.
 //
-// Faehrt die schwere Track-Verarbeitung (Parsen + Anreichern + Modellbau) aus
-// dem Main-Thread heraus, damit die UI beim Laden grosser Tracks nicht
-// einfriert. Der Worker liefert fertige `TrackData` zurueck.
+// Faehrt die schwere Verarbeitung aus dem Main-Thread heraus, damit die UI
+// nicht einfriert:
+//   - "gpx":     GPX-Text → TrackData
+//   - "terrain": Track-Bounds → DemGrid (Kacheln laden/dekodieren/stitchen)
 //
-// Im Worker steht kein DOMParser zur Verfuegung — die GPX-Pipeline nutzt
-// deshalb fast-xml-parser (siehe pipeline/parsing/gpx.ts).
+// Im Worker steht kein DOMParser zur Verfuegung — GPX nutzt fast-xml-parser,
+// Terrain nutzt fetch/createImageBitmap/OffscreenCanvas.
 // ---------------------------------------------------------------------------
 
 import { processGpx } from "../pipeline";
-import type { TrackData } from "../types";
+import { buildTerrain } from "../pipeline/terrain/build";
+import type { DemGrid, TrackBounds, TrackData } from "../types";
 
-export interface PipelineRequest {
-  id: number;
-  format: "gpx";
-  text: string;
-  name: string;
-}
+export type PipelineRequest =
+  | { id: number; kind: "gpx"; text: string; name: string }
+  | { id: number; kind: "terrain"; bounds: TrackBounds };
 
 export type PipelineResponse =
-  | { id: number; ok: true; track: TrackData }
+  | { id: number; ok: true; kind: "gpx"; track: TrackData }
+  | { id: number; ok: true; kind: "terrain"; dem: DemGrid }
   | { id: number; ok: false; error: string };
 
-self.onmessage = (e: MessageEvent<PipelineRequest>) => {
+function post(res: PipelineResponse): void {
+  self.postMessage(res);
+}
+
+self.onmessage = async (e: MessageEvent<PipelineRequest>) => {
   const req = e.data;
   try {
-    let track: TrackData;
-    switch (req.format) {
+    switch (req.kind) {
       case "gpx":
-        track = processGpx(req.text, req.name);
+        post({ id: req.id, ok: true, kind: "gpx", track: processGpx(req.text, req.name) });
+        break;
+      case "terrain":
+        post({ id: req.id, ok: true, kind: "terrain", dem: await buildTerrain(req.bounds) });
         break;
       default:
-        throw new Error(`Unbekanntes Format: ${req.format as string}`);
+        throw new Error("Unbekannter Request-Typ");
     }
-    const res: PipelineResponse = { id: req.id, ok: true, track };
-    self.postMessage(res);
   } catch (err) {
-    const res: PipelineResponse = {
+    post({
       id: req.id,
       ok: false,
       error: err instanceof Error ? err.message : String(err),
-    };
-    self.postMessage(res);
+    });
   }
 };

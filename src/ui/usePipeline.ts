@@ -1,24 +1,30 @@
 // ---------------------------------------------------------------------------
 // React-Hook fuer die Pipeline im Web Worker.
 //
-// Haelt eine Worker-Instanz ueber die Lebensdauer der Komponente, korreliert
-// Anfragen/Antworten ueber eine fortlaufende ID und liefert das Ergebnis als
-// Promise. Die Datei wird im Main-Thread gelesen (File.text()), die schwere
-// Verarbeitung laeuft im Worker.
+// Haelt eine Worker-Instanz, korreliert Anfragen/Antworten ueber eine
+// fortlaufende ID und liefert Ergebnisse als Promise. Unterstuetzt GPX-Parsing
+// und Terrain-Download.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef } from "react";
 
-import type { TrackData } from "../types";
+import type { DemGrid, TrackBounds, TrackData } from "../types";
 import type {
   PipelineRequest,
   PipelineResponse,
 } from "../workers/pipeline.worker";
 
 type Pending = {
-  resolve: (track: TrackData) => void;
+  resolve: (res: PipelineResponse) => void;
   reject: (err: Error) => void;
 };
+
+// Distributiver Omit: erhaelt die einzelnen Varianten der Union (sonst bleiben
+// nur die gemeinsamen Felder uebrig).
+type DistributiveOmit<T, K extends keyof T> = T extends unknown
+  ? Omit<T, K>
+  : never;
+type PipelineRequestInput = DistributiveOmit<PipelineRequest, "id">;
 
 export function usePipeline() {
   const workerRef = useRef<Worker | null>(null);
@@ -35,7 +41,7 @@ export function usePipeline() {
       const pending = pendingRef.current.get(res.id);
       if (!pending) return;
       pendingRef.current.delete(res.id);
-      if (res.ok) pending.resolve(res.track);
+      if (res.ok) pending.resolve(res);
       else pending.reject(new Error(res.error));
     };
     workerRef.current = worker;
@@ -47,19 +53,38 @@ export function usePipeline() {
     };
   }, []);
 
-  const loadGpxFile = useCallback(async (file: File): Promise<TrackData> => {
-    const worker = workerRef.current;
-    if (!worker) throw new Error("Worker nicht bereit");
-    const text = await file.text();
-    const id = nextIdRef.current++;
-    const name = file.name.replace(/\.[^.]+$/, "");
+  const post = useCallback(
+    (req: PipelineRequestInput): Promise<PipelineResponse> => {
+      const worker = workerRef.current;
+      if (!worker) return Promise.reject(new Error("Worker nicht bereit"));
+      const id = nextIdRef.current++;
+      return new Promise<PipelineResponse>((resolve, reject) => {
+        pendingRef.current.set(id, { resolve, reject });
+        worker.postMessage({ ...req, id } as PipelineRequest);
+      });
+    },
+    [],
+  );
 
-    return new Promise<TrackData>((resolve, reject) => {
-      pendingRef.current.set(id, { resolve, reject });
-      const req: PipelineRequest = { id, format: "gpx", text, name };
-      worker.postMessage(req);
-    });
-  }, []);
+  const loadGpxFile = useCallback(
+    async (file: File): Promise<TrackData> => {
+      const text = await file.text();
+      const name = file.name.replace(/\.[^.]+$/, "");
+      const res = await post({ kind: "gpx", text, name });
+      if (res.ok && res.kind === "gpx") return res.track;
+      throw new Error("Unerwartete Antwort fuer GPX-Anfrage");
+    },
+    [post],
+  );
 
-  return { loadGpxFile };
+  const loadTerrain = useCallback(
+    async (bounds: TrackBounds): Promise<DemGrid> => {
+      const res = await post({ kind: "terrain", bounds });
+      if (res.ok && res.kind === "terrain") return res.dem;
+      throw new Error("Unerwartete Antwort fuer Terrain-Anfrage");
+    },
+    [post],
+  );
+
+  return { loadGpxFile, loadTerrain };
 }

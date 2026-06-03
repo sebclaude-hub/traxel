@@ -6,17 +6,19 @@
 // Z-Ueberhoehung. Bibliothek, Terrain, Karten, NMEA etc. folgen spaeter.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ColorMode, TrackData } from "../types";
+import type { ColorMode, DemGrid, TrackData } from "../types";
 import { TrackViewer } from "../viewer/TrackViewer";
 import { formatDistance, formatDuration } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
 
 const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 
+type TerrainState = "idle" | "loading" | "ok" | "error";
+
 export default function App() {
-  const { loadGpxFile } = usePipeline();
+  const { loadGpxFile, loadTerrain } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +28,37 @@ export default function App() {
   const [showCurtain, setShowCurtain] = useState(true);
   const [zScale, setZScale] = useState(3);
 
+  const [dem, setDem] = useState<DemGrid | null>(null);
+  const [terrainState, setTerrainState] = useState<TerrainState>("idle");
+  const [showTerrain, setShowTerrain] = useState(true);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Terrain laden, sobald ein Track vorliegt (im Worker). Bei Trackwechsel
+  // wird der vorherige Lauf per cancelled-Flag verworfen.
+  useEffect(() => {
+    if (!track) {
+      setDem(null);
+      setTerrainState("idle");
+      return;
+    }
+    let cancelled = false;
+    setDem(null);
+    setTerrainState("loading");
+    loadTerrain(track.meta.bounds)
+      .then((grid) => {
+        if (!cancelled) {
+          setDem(grid);
+          setTerrainState("ok");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTerrainState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [track, loadTerrain]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -94,6 +126,9 @@ export default function App() {
             {track.meta.source_type.toUpperCase()} ·{" "}
             {formatDistance(track.meta.total_distance_m)} ·{" "}
             {formatDuration(track.meta.duration_s)} · {track.meta.n_points} Punkte
+            {terrainState === "loading" && " · Terrain lädt…"}
+            {terrainState === "ok" && " · Terrain"}
+            {terrainState === "error" && " · Terrain nicht verfügbar"}
           </span>
           <button style={btnStyle} onClick={() => fileInputRef.current?.click()}>
             Andere Datei…
@@ -106,6 +141,7 @@ export default function App() {
           <>
             <TrackViewer
               track={track}
+              dem={showTerrain ? dem : null}
               colorMode={colorMode}
               showCurtain={showCurtain}
               zScale={zScale}
@@ -127,6 +163,16 @@ export default function App() {
                 ]}
                 onChange={setShowCurtain}
               />
+              {dem && (
+                <Segmented<boolean>
+                  value={showTerrain}
+                  options={[
+                    [true, "Terrain"],
+                    [false, "aus"],
+                  ]}
+                  onChange={setShowTerrain}
+                />
+              )}
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {Z_OPTIONS.map((z) => (
                   <button

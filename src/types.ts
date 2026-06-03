@@ -63,3 +63,20 @@ export interface TrackData {
   quantile_breaks: QuantileBreaks;
   points: TrackPoints;
 }
+
+// ---------------------------------------------------------------------------
+// Terrain
+// ---------------------------------------------------------------------------
+
+/** Regulaeres Hoehen-Grid in geografischen Koordinaten (lat/lon linear).
+ *  Zeile 0 liegt im Sueden (lat_min), Spalte 0 im Westen (lon_min) —
+ *  passend zur Mesh-/Sampling-Konvention. */
+export interface DemGrid {
+  n_rows: number;
+  n_cols: number;
+  lat_min: number;
+  lat_max: number;
+  lon_min: number;
+  lon_max: number;
+  elevations: (number | null)[];
+}

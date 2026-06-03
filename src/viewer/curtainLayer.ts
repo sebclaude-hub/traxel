@@ -10,12 +10,16 @@
 // super-duenner XY-Streifen zwischen Punkt i und i+1 (Breite ~11 cm via
 // perpendikularem Offset, damit earcut eine triangulierbare Flaeche hat).
 // `getElevation` extrudiert den Streifen auf die mittlere Track-Hoehe.
+//
+// Boden: liegt ein DEM vor, folgt die Unterkante dem Terrain (sampleDem),
+// sonst 0 m MSL.
 // ---------------------------------------------------------------------------
 
 import { SolidPolygonLayer } from "@deck.gl/layers";
 
-import type { TrackData } from "../types";
+import type { DemGrid, TrackData } from "../types";
 import { plasmaColor, type Rgba } from "./colorMap";
+import { sampleDem } from "./demMesh";
 
 export interface CurtainSegment {
   /** 4-Punkt-3D-Footprint (eps-Streifen perpendikular, z = Boden-Hoehe). */
@@ -31,6 +35,7 @@ const EPS = 1e-6; // grad ≈ 11 cm — gibt earcut eine triangulierbare XY-Flae
 
 export function buildCurtainSegments(
   track: TrackData,
+  dem: DemGrid | null,
   rankPositions: number[],
   altBase: number,
   zScale: number,
@@ -39,7 +44,7 @@ export function buildCurtainSegments(
   const n = lat.length;
   const segments: CurtainSegment[] = [];
 
-  const exagTrack = (h: number) => altBase + (h - altBase) * zScale;
+  const exag = (h: number) => altBase + (h - altBase) * zScale;
 
   for (let i = 0; i < n - 1; i++) {
     const lonA = lon[i];
@@ -63,8 +68,14 @@ export function buildCurtainSegments(
     const px = (-dy / len) * EPS;
     const py = (dx / len) * EPS;
 
-    const top = (exagTrack(altA) + exagTrack(altB)) / 2;
-    const bot = 0; // Boden = 0 m MSL (kein Terrain im Durchstich)
+    const top = (exag(altA) + exag(altB)) / 2;
+    // Boden: dem ? Terrain-Hoehe : 0 m MSL.
+    let bot = 0;
+    if (dem) {
+      const bA = sampleDem(dem, lonA, latA);
+      const bB = sampleDem(dem, lonB, latB);
+      if (bA !== null && bB !== null) bot = exag((bA + bB) / 2);
+    }
     const base = Math.min(top, bot);
     const height = Math.abs(top - bot);
 

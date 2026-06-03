@@ -11,13 +11,15 @@ import DeckGL from "deck.gl";
 import { MapView } from "@deck.gl/core";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 
-import type { ColorMode, TrackData } from "../types";
+import type { ColorMode, DemGrid, TrackData } from "../types";
 import { buildCurtainSegments, makeCurtainLayer } from "./curtainLayer";
+import { makeTerrainLayer } from "./terrainLayer";
 import { computeRankPositions, plasmaColor, type Rgba } from "./colorMap";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
 interface Props {
   track: TrackData;
+  dem: DemGrid | null;
   colorMode: ColorMode;
   showCurtain: boolean;
   zScale: number;
@@ -53,7 +55,7 @@ function minAlt(alts: (number | null)[]): number {
   return Number.isFinite(min) ? min : 0;
 }
 
-export function TrackViewer({ track, colorMode, showCurtain, zScale }: Props) {
+export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Props) {
   const [viewState, setViewState] = useState<DeckViewState>(() =>
     buildInitialViewState(track),
   );
@@ -72,8 +74,8 @@ export function TrackViewer({ track, colorMode, showCurtain, zScale }: Props) {
   }, [track, colorMode]);
 
   const curtainSegments = useMemo(
-    () => buildCurtainSegments(track, rankPositions, altBase, zScale),
-    [track, rankPositions, altBase, zScale],
+    () => buildCurtainSegments(track, dem, rankPositions, altBase, zScale),
+    [track, dem, rankPositions, altBase, zScale],
   );
 
   // Track als individuelle, eingefaerbte Segmente.
@@ -101,6 +103,9 @@ export function TrackViewer({ track, colorMode, showCurtain, zScale }: Props) {
 
   const layers = useMemo(() => {
     const result = [];
+
+    // Terrain zuerst, damit Vorhang und Track darueber liegen.
+    if (dem) result.push(makeTerrainLayer(dem, altBase, zScale));
 
     if (showCurtain) result.push(makeCurtainLayer(curtainSegments));
 
@@ -137,7 +142,7 @@ export function TrackViewer({ track, colorMode, showCurtain, zScale }: Props) {
     );
 
     return result;
-  }, [curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase]);
+  }, [dem, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase]);
 
   // deck.gl-Callback-Typen (ViewStateChangeParameters/PickingInfo) passen nicht
   // auf eine handgeschnittene Form — wie im Ursprungs-Viewer `any`.
