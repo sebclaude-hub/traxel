@@ -84,7 +84,13 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
   // Drag-Zustand der Karten-Griffe. baseRef haelt die Platzierung beim
   // Drag-Start fest (stabile Skalierung beim Eck-Griff).
   const [handleDragging, setHandleDragging] = useState(false);
-  const dragRef = useRef<{ kind: "center" | "corner"; base: ChartPlacement } | null>(null);
+  const dragRef = useRef<{
+    kind: "center" | "corner";
+    base: ChartPlacement;
+    startLon: number;
+    startLat: number;
+    chartZ: number;
+  } | null>(null);
 
   const altBase = useMemo(() => minAlt(track.points.alt), [track]);
   const exagAlt = useCallback(
@@ -254,33 +260,64 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
     [track],
   );
 
+  // Cursor auf die Karten-Hoehe zurueckprojizieren (statt z=0) — sonst springt
+  // die Karte in der gekippten Ansicht weit weg. Fallback: info.coordinate.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const groundAt = useCallback((info: any, z: number): [number, number] | null => {
+    if (info?.viewport && typeof info.x === "number" && typeof info.y === "number") {
+      try {
+        const c = info.viewport.unproject([info.x, info.y], { targetZ: z });
+        if (c && Number.isFinite(c[0]) && Number.isFinite(c[1])) return [c[0], c[1]];
+      } catch {
+        /* Fallback unten */
+      }
+    }
+    return info?.coordinate ? [info.coordinate[0], info.coordinate[1]] : null;
+  }, []);
+
   // Drag der Karten-Griffe (auf DeckGL-Ebene; true zurueckgeben stoppt das Pan).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onDragStart = useCallback(
     (info: any) => {
-      if (editChart && info?.object && info.layer?.id === "chart-handles") {
-        dragRef.current = { kind: info.object.kind, base: editChart.placement };
-        setHandleDragging(true);
-        return true;
-      }
-      return false;
+      if (!editChart || !info?.object || info.layer?.id !== "chart-handles") return false;
+      const base = editChart.placement;
+      const terr = dem ? sampleDem(dem, base.centerLon, base.centerLat) ?? 0 : 0;
+      const chartZ = altBase + (terr - altBase) * zScale;
+      const start = groundAt(info, chartZ);
+      if (!start) return false;
+      dragRef.current = {
+        kind: info.object.kind,
+        base,
+        startLon: start[0],
+        startLat: start[1],
+        chartZ,
+      };
+      setHandleDragging(true);
+      return true;
     },
-    [editChart],
+    [editChart, dem, altBase, zScale, groundAt],
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onDrag = useCallback(
     (info: any) => {
       const d = dragRef.current;
-      if (!d || !editChart || !info?.coordinate) return false;
-      const [lon, lat] = info.coordinate;
+      if (!d || !editChart) return false;
+      const coord = groundAt(info, d.chartZ);
+      if (!coord) return false;
+      const [lon, lat] = coord;
       if (d.kind === "center") {
-        editChart.onChange({ ...d.base, centerLon: lon, centerLat: lat });
+        // Per Delta verschieben (robust gegen Rest-Versatz der Projektion).
+        editChart.onChange({
+          ...d.base,
+          centerLon: d.base.centerLon + (lon - d.startLon),
+          centerLat: d.base.centerLat + (lat - d.startLat),
+        });
       } else {
         editChart.onChange(cornerDragToPlacement(d.base, lon, lat));
       }
       return true;
     },
-    [editChart],
+    [editChart, groundAt],
   );
   const onDragEnd = useCallback(() => {
     dragRef.current = null;

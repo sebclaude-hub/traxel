@@ -34,7 +34,10 @@ const TARGET_METERS_PER_VERTEX = 50;
 const SUBDIV_CAP = 256;
 const SUBDIV_FLOOR = 8;
 const Z_LIFT_SUBGRID_M = 0.0;
-const Z_LIFT_BILINEAR_M = 5.0;
+// Strategie B liftet in ECHTEN Metern (vor der Z-Ueberhoehung), damit der Lift
+// automatisch mit zScale waechst und das Terrain nicht zwischen den (anders
+// triangulierten) Vertices durchstoesst. 8 m sind auf grossen Karten unsichtbar.
+const Z_LIFT_BILINEAR_RAW_M = 8.0;
 const AXIS_ALIGN_EPS_DEG = 1e-6;
 
 function isAxisAligned(chart: ChartOverlay): boolean {
@@ -185,7 +188,7 @@ function buildFromBilinearCorners(
       }
       positions[pIdx++] = (lon - lon_center) * mpLon;
       positions[pIdx++] = (lat - lat_center) * mpLat;
-      positions[pIdx++] = altBase + (elev - altBase) * zScale + Z_LIFT_BILINEAR_M;
+      positions[pIdx++] = altBase + (elev - altBase + Z_LIFT_BILINEAR_RAW_M) * zScale;
       texCoords[tIdx++] = u;
       texCoords[tIdx++] = v;
     }
