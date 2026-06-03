@@ -6,9 +6,10 @@
 // Z-Ueberhoehung. Bibliothek, Terrain, Karten, NMEA etc. folgen spaeter.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ColorMode, DemGrid, TrackData } from "../types";
+import { enrichTrackWithTerrain } from "../pipeline/terrain";
 import { TrackViewer } from "../viewer/TrackViewer";
 import { formatDistance, formatDuration } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
@@ -101,6 +102,34 @@ export default function App() {
     [handleFile],
   );
 
+  // Nur wenn Terrain sichtbar ist, gibt es einen Boden fuer above_terrain/AGL.
+  const activeDem = showTerrain ? dem : null;
+
+  // Track mit Terrain anreichern (above_terrain, track_mode) — fuer Tooltip
+  // und Flug/Boden-Anzeige. Ohne Terrain bleibt der Originaltrack.
+  const viewTrack = useMemo(
+    () => (track && activeDem ? enrichTrackWithTerrain(track, activeDem) : track),
+    [track, activeDem],
+  );
+
+  // Flug-/Drohnen-Farbmodi nur mit Terrain. Ist Terrain aus, faellt ein
+  // aktiver flight/drone-Modus auf Speed zurueck.
+  const effColorMode: ColorMode =
+    !activeDem && (colorMode === "flight" || colorMode === "drone")
+      ? "speed"
+      : colorMode;
+  const colorOptions: [ColorMode, string][] = activeDem
+    ? [
+        ["speed", "Tempo"],
+        ["altitude", "Höhe"],
+        ["flight", "Flug"],
+        ["drone", "Drohne"],
+      ]
+    : [
+        ["speed", "Geschwindigkeit"],
+        ["altitude", "Höhe"],
+      ];
+
   return (
     <div
       style={rootStyle}
@@ -119,15 +148,16 @@ export default function App() {
         onChange={onInputChange}
       />
 
-      {track && (
+      {viewTrack && (
         <div style={headerStyle}>
-          <span style={{ fontWeight: 600, fontSize: 15 }}>{track.meta.name}</span>
+          <span style={{ fontWeight: 600, fontSize: 15 }}>{viewTrack.meta.name}</span>
           <span style={{ color: "#888", fontSize: 12 }}>
-            {track.meta.source_type.toUpperCase()} ·{" "}
-            {formatDistance(track.meta.total_distance_m)} ·{" "}
-            {formatDuration(track.meta.duration_s)} · {track.meta.n_points} Punkte
+            {viewTrack.meta.source_type.toUpperCase()} ·{" "}
+            {formatDistance(viewTrack.meta.total_distance_m)} ·{" "}
+            {formatDuration(viewTrack.meta.duration_s)} · {viewTrack.meta.n_points} Punkte
             {terrainState === "loading" && " · Terrain lädt…"}
-            {terrainState === "ok" && " · Terrain"}
+            {terrainState === "ok" &&
+              ` · ${viewTrack.meta.track_mode === "flight" ? "✈ Flug" : "🚗 Boden"}`}
             {terrainState === "error" && " · Terrain nicht verfügbar"}
           </span>
           <button style={btnStyle} onClick={() => fileInputRef.current?.click()}>
@@ -137,22 +167,19 @@ export default function App() {
       )}
 
       <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
-        {track ? (
+        {viewTrack ? (
           <>
             <TrackViewer
-              track={track}
-              dem={showTerrain ? dem : null}
-              colorMode={colorMode}
+              track={viewTrack}
+              dem={activeDem}
+              colorMode={effColorMode}
               showCurtain={showCurtain}
               zScale={zScale}
             />
             <div style={togglesStyle}>
               <Segmented<ColorMode>
-                value={colorMode}
-                options={[
-                  ["speed", "Geschwindigkeit"],
-                  ["altitude", "Höhe"],
-                ]}
+                value={effColorMode}
+                options={colorOptions}
                 onChange={setColorMode}
               />
               <Segmented<boolean>
@@ -311,7 +338,7 @@ const btnActiveStyle: React.CSSProperties = {
   ...btnStyle,
   background: "#3a5",
   color: "#031",
-  borderColor: "#3a5",
+  border: "1px solid #3a5",
   fontWeight: 600,
 };
 const btnPrimaryStyle: React.CSSProperties = {

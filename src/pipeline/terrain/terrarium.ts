@@ -9,6 +9,7 @@
 // daher nur dort lauffaehig.
 // ---------------------------------------------------------------------------
 
+import { readCachedTile, writeCachedTile } from "./tile-cache";
 import { type Tile, terrariumTileUrl, tileToBounds, type TileBounds } from "./tiles";
 
 export interface DecodedTile {
@@ -40,20 +41,25 @@ export function decodeTerrarium(
 
 /**
  * Laedt und dekodiert eine einzelne terrarium-Kachel.
- * Nur im Browser/Worker lauffaehig (createImageBitmap/OffscreenCanvas).
+ * Nutzt den OPFS-Cache (Treffer → kein Netzwerk). Nur im Browser/Worker
+ * lauffaehig (createImageBitmap/OffscreenCanvas).
  */
 export async function fetchTerrariumTile(
   tile: Tile,
   signal?: AbortSignal,
 ): Promise<DecodedTile> {
-  const resp = await fetch(terrariumTileUrl(tile), { signal });
-  if (!resp.ok) {
-    throw new Error(
-      `Terrain-Kachel ${tile.z}/${tile.x}/${tile.y}: HTTP ${resp.status}`,
-    );
+  let bytes = await readCachedTile(tile);
+  if (!bytes) {
+    const resp = await fetch(terrariumTileUrl(tile), { signal });
+    if (!resp.ok) {
+      throw new Error(
+        `Terrain-Kachel ${tile.z}/${tile.x}/${tile.y}: HTTP ${resp.status}`,
+      );
+    }
+    bytes = await resp.arrayBuffer();
+    await writeCachedTile(tile, bytes);
   }
-  const blob = await resp.blob();
-  const bitmap = await createImageBitmap(blob);
+  const bitmap = await createImageBitmap(new Blob([bytes]));
   const { width, height } = bitmap;
 
   const canvas = new OffscreenCanvas(width, height);

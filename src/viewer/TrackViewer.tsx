@@ -66,12 +66,17 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Prop
     [altBase, zScale],
   );
 
-  // Rang-Position pro Punkt fuer den gewaehlten Farbmodus.
+  // Die Track-Linie bleibt bei flight/drone auf Speed-Plasma; die Klassen-
+  // faerbung passiert nur am Vorhang. Fuer speed/altitude folgt sie dem Modus.
+  const trackColorMode: ColorMode =
+    colorMode === "flight" || colorMode === "drone" ? "speed" : colorMode;
+
+  // Rang-Position pro Punkt fuer den effektiven Track-Farbmodus.
   const rankPositions = useMemo(() => {
     const values =
-      colorMode === "altitude" ? track.points.alt : track.points.speed_kmh;
+      trackColorMode === "altitude" ? track.points.alt : track.points.speed_kmh;
     return computeRankPositions(values);
-  }, [track, colorMode]);
+  }, [track, trackColorMode]);
 
   const curtainSegments = useMemo(
     () => buildCurtainSegments(track, dem, rankPositions, altBase, zScale),
@@ -107,7 +112,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Prop
     // Terrain zuerst, damit Vorhang und Track darueber liegen.
     if (dem) result.push(makeTerrainLayer(dem, altBase, zScale));
 
-    if (showCurtain) result.push(makeCurtainLayer(curtainSegments));
+    if (showCurtain) result.push(makeCurtainLayer(curtainSegments, colorMode));
 
     result.push(
       new PathLayer<{ path: [number, number, number][]; t: number }>({
@@ -162,11 +167,13 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Prop
       const ts = track.points.timestamp_ms[idx];
       const speed = track.points.speed_kmh[idx] ?? null;
       const alt = track.points.alt[idx] ?? null;
+      const above = track.points.above_terrain[idx] ?? null;
 
       const lines: string[] = [];
       if (ts) lines.push(formatTimestamp(ts));
       lines.push(formatSpeed(speed));
       lines.push(`MSL ${formatAltitude(alt)}`);
+      if (above !== null) lines.push(`üG ${Math.round(above)} m`);
 
       return {
         html: lines.map((l) => `<div>${l}</div>`).join(""),

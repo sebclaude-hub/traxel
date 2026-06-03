@@ -9,3 +9,6 @@ export * from "./tiles";
 export * from "./terrarium";
 export * from "./stitch";
 export * from "./build";
+export * from "./sample";
+export * from "./enrich-terrain";
+export * from "./tile-cache";
