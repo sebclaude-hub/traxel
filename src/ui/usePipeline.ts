@@ -66,13 +66,15 @@ export function usePipeline() {
     [],
   );
 
-  const loadGpxFile = useCallback(
+  const loadTrackFile = useCallback(
     async (file: File): Promise<TrackData> => {
       const text = await file.text();
       const name = file.name.replace(/\.[^.]+$/, "");
-      const res = await post({ kind: "gpx", text, name });
-      if (res.ok && res.kind === "gpx") return res.track;
-      throw new Error("Unerwartete Antwort fuer GPX-Anfrage");
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      const kind = ext === "kml" ? "kml" : "gpx";
+      const res = await post({ kind, text, name });
+      if (res.ok && (res.kind === "gpx" || res.kind === "kml")) return res.track;
+      throw new Error("Unerwartete Antwort fuer Track-Anfrage");
     },
     [post],
   );
@@ -86,5 +88,5 @@ export function usePipeline() {
     [post],
   );
 
-  return { loadGpxFile, loadTerrain };
+  return { loadTrackFile, loadTerrain };
 }

@@ -10,16 +10,18 @@
 // Terrain nutzt fetch/createImageBitmap/OffscreenCanvas.
 // ---------------------------------------------------------------------------
 
-import { processGpx } from "../pipeline";
+import { processGpx, processKml } from "../pipeline";
 import { buildTerrain } from "../pipeline/terrain";
 import type { DemGrid, TrackBounds, TrackData } from "../types";
 
 export type PipelineRequest =
   | { id: number; kind: "gpx"; text: string; name: string }
+  | { id: number; kind: "kml"; text: string; name: string }
   | { id: number; kind: "terrain"; bounds: TrackBounds };
 
 export type PipelineResponse =
   | { id: number; ok: true; kind: "gpx"; track: TrackData }
+  | { id: number; ok: true; kind: "kml"; track: TrackData }
   | { id: number; ok: true; kind: "terrain"; dem: DemGrid }
   | { id: number; ok: false; error: string };
 
@@ -33,6 +35,9 @@ self.onmessage = async (e: MessageEvent<PipelineRequest>) => {
     switch (req.kind) {
       case "gpx":
         post({ id: req.id, ok: true, kind: "gpx", track: processGpx(req.text, req.name) });
+        break;
+      case "kml":
+        post({ id: req.id, ok: true, kind: "kml", track: processKml(req.text, req.name) });
         break;
       case "terrain":
         post({ id: req.id, ok: true, kind: "terrain", dem: await buildTerrain(req.bounds) });

@@ -19,7 +19,7 @@ const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 type TerrainState = "idle" | "loading" | "ok" | "error";
 
 export default function App() {
-  const { loadGpxFile, loadTerrain } = usePipeline();
+  const { loadTrackFile, loadTerrain } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export default function App() {
       setLoading(true);
       setError(null);
       try {
-        const td = await loadGpxFile(file);
+        const td = await loadTrackFile(file);
         if (td.meta.n_points === 0) {
           setError("Keine gueltigen Trackpunkte in der Datei.");
           setTrack(null);
@@ -80,7 +80,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [loadGpxFile],
+    [loadTrackFile],
   );
 
   const onDrop = useCallback(
@@ -143,7 +143,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".gpx,application/gpx+xml,text/xml"
+        accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml,text/xml"
         style={{ display: "none" }}
         onChange={onInputChange}
       />
@@ -242,7 +242,7 @@ function DropPrompt({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>Traxel</div>
         <div style={{ color: "#aaa", fontSize: 14, marginBottom: 20 }}>
-          GPX-Datei hierher ziehen
+          GPX- oder KML-Datei hierher ziehen
         </div>
         <button style={btnPrimaryStyle} onClick={onPick}>
           Datei auswählen

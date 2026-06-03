@@ -8,6 +8,7 @@
 
 import type { TrackData } from "../types";
 import { parseGpx } from "./parsing/gpx";
+import { parseKml } from "./parsing/kml";
 import { enrichSpeed } from "./processing/enrich";
 import { buildTrackData } from "./processing/track-model";
 
@@ -24,4 +25,17 @@ export function processGpx(xml: string, name: string): TrackData {
   const raw = parseGpx(xml);
   const enriched = enrichSpeed(raw);
   return buildTrackData(enriched, { name, sourceType: "gpx" });
+}
+
+/**
+ * Volle KML-Pipeline: parsen (gx:Track) → Schema B → anreichern → TrackData.
+ * KML liefert keine Geschwindigkeit; enrichSpeed fuellt sie geodaetisch auf.
+ *
+ * @param xml  KML-Inhalt (XML als String).
+ * @param name Anzeigename des Tracks im Viewer.
+ */
+export function processKml(xml: string, name: string): TrackData {
+  const raw = parseKml(xml);
+  const enriched = enrichSpeed(raw);
+  return buildTrackData(enriched, { name, sourceType: "kml" });
 }

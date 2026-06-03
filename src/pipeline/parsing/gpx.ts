@@ -20,49 +20,11 @@
 // erhalten — nachgelagerte Module (enrichSpeed) gehen damit um.
 // ---------------------------------------------------------------------------
 
-import { XMLParser } from "fast-xml-parser";
-
 import { KMH_PER_MPS, KNOTS_PER_MPS } from "../constants";
 import type { RawTrackPoint } from "../types";
+import { asArray, makeXmlParser, parseFloatOrNull, parseTimeMs } from "./xml";
 
-// removeNSPrefix: true normalisiert sowohl <trkpt> als auch <gpx:trkpt> zu
-// "trkpt". Werte/Attribute bleiben Strings, damit wir sie kontrolliert mit
-// parseFloat lesen (wie das explizite float() im Python-Port).
-const parser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  removeNSPrefix: true,
-  parseAttributeValue: false,
-  parseTagValue: false,
-  trimValues: true,
-});
-
-/** Normalisiert fast-xml-parser-Ergebnisse: Einzelelement → Array. */
-function asArray<T>(x: T | T[] | undefined): T[] {
-  if (x === undefined || x === null) return [];
-  return Array.isArray(x) ? x : [x];
-}
-
-function parseFloatOrNull(text: unknown): number | null {
-  if (text === undefined || text === null) return null;
-  const v = parseFloat(String(text));
-  return Number.isNaN(v) ? null : v;
-}
-
-/**
- * ISO-8601-Zeit zu Unix-Millisekunden (UTC). null bei Fehler.
- * Fehlt die Zeitzone, wird UTC angenommen (GPX-Spec schreibt UTC vor) — so
- * verhaelt sich auch der Python-Port (pd.to_datetime(..., utc=True)).
- */
-function parseTimeMs(text: unknown): number | null {
-  if (text === undefined || text === null) return null;
-  let s = String(text).trim();
-  if (s === "") return null;
-  const hasTz = /[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s);
-  if (!hasTz) s += "Z";
-  const ms = Date.parse(s);
-  return Number.isNaN(ms) ? null : ms;
-}
+const parser = makeXmlParser();
 
 /** Geschwindigkeit (m/s) aus <speed> oder <extensions><speed>. */
 function findSpeedMs(trkpt: Record<string, unknown>): number | null {
