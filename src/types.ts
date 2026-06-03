@@ -1,0 +1,65 @@
+// ---------------------------------------------------------------------------
+// Geteiltes Datenmodell zwischen Pipeline und Viewer.
+//
+// Entspricht dem erprobten Vertrag aus dem Vorgaenger-Viewer: die Pipeline
+// erzeugt `TrackData`, der Viewer rendert es. Frueher lief dieser Vertrag
+// ueber `track.json` auf der Platte — in Traxel wird `TrackData` direkt im
+// Speicher uebergeben.
+//
+// Hier stehen nur die track-bezogenen Typen. DEM-, Satelliten- und
+// Manifest-Typen kommen in spaeteren Phasen dazu.
+// ---------------------------------------------------------------------------
+
+export interface TrackBounds {
+  lon_min: number;
+  lat_min: number;
+  lon_max: number;
+  lat_max: number;
+}
+
+export interface TrackMeta {
+  name: string;
+  source_type: "nmea" | "gpx" | "kml";
+  n_points: number;
+  total_distance_m: number;
+  duration_s: number;
+  timestamp_start_utc: string | null;
+  timestamp_end_utc: string | null;
+  bounds: TrackBounds;
+  /** "flight" wenn der Track im Median >100 m ueber Terrain liegt, sonst
+   *  "ground". Ohne Terrain-Daten immer "ground". */
+  track_mode: "flight" | "ground";
+  has_terrain: boolean;
+  has_satellites: boolean;
+}
+
+export interface QuantileBreaks {
+  /** n_quantiles+1 Grenzwerte (inkl. min und max) der Geschwindigkeit. */
+  speed_kmh: number[];
+  /** n_quantiles+1 Grenzwerte (inkl. min und max) der Hoehe. */
+  altitude_m: number[];
+  n_quantiles: number;
+}
+
+export type ColorMode = "speed" | "altitude" | "flight" | "drone";
+
+export interface TrackPoints {
+  lat: number[];
+  lon: number[];
+  alt: (number | null)[];
+  terrain_elev: (number | null)[];
+  above_terrain: (number | null)[];
+  speed_kmh: (number | null)[];
+  distance_m: (number | null)[];
+  timestamp_ms: number[];
+  /** Quantilklasse 0..n-1 der Geschwindigkeit pro Punkt; -1 = ohne Wert. */
+  speed_q_idx: number[];
+  /** Quantilklasse 0..n-1 der Hoehe pro Punkt; -1 = ohne Wert. */
+  alt_q_idx: number[];
+}
+
+export interface TrackData {
+  meta: TrackMeta;
+  quantile_breaks: QuantileBreaks;
+  points: TrackPoints;
+}
