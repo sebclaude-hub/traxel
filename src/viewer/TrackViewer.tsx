@@ -14,8 +14,15 @@ import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { ColorMode, DemGrid, TrackData } from "../types";
 import { buildCurtainSegments, makeCurtainLayer } from "./curtainLayer";
 import { makeTerrainLayer } from "./terrainLayer";
+import { makeChartLayer } from "./chartLayer";
+import type { ChartOverlay } from "./chartMesh";
 import { computeRankPositions, plasmaColor, type Rgba } from "./colorMap";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
+
+export interface PlacedChart {
+  overlay: ChartOverlay;
+  image: ImageBitmap | HTMLImageElement;
+}
 
 interface Props {
   track: TrackData;
@@ -23,6 +30,7 @@ interface Props {
   colorMode: ColorMode;
   showCurtain: boolean;
   zScale: number;
+  charts?: PlacedChart[];
 }
 
 interface DeckViewState {
@@ -55,7 +63,7 @@ function minAlt(alts: (number | null)[]): number {
   return Number.isFinite(min) ? min : 0;
 }
 
-export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Props) {
+export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts = [] }: Props) {
   const [viewState, setViewState] = useState<DeckViewState>(() =>
     buildInitialViewState(track),
   );
@@ -112,6 +120,11 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Prop
     // Terrain zuerst, damit Vorhang und Track darueber liegen.
     if (dem) result.push(makeTerrainLayer(dem, altBase, zScale));
 
+    // Karten-Overlays auf das Terrain drapen (unter Vorhang/Track).
+    for (const c of charts) {
+      result.push(makeChartLayer(c.overlay, c.image, dem, altBase, zScale));
+    }
+
     if (showCurtain) result.push(makeCurtainLayer(curtainSegments, colorMode));
 
     result.push(
@@ -147,7 +160,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale }: Prop
     );
 
     return result;
-  }, [dem, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase]);
+  }, [dem, charts, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase]);
 
   // deck.gl-Callback-Typen (ViewStateChangeParameters/PickingInfo) passen nicht
   // auf eine handgeschnittene Form — wie im Ursprungs-Viewer `any`.

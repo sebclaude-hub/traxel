@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
 import { applyCuts, type CutMode, type CutSpec } from "../pipeline";
 import { enrichTrackWithTerrain } from "../pipeline/terrain";
-import { TrackViewer } from "../viewer/TrackViewer";
+import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
+import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
 import { SkyPlot } from "../viewer/SkyPlot";
 import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
@@ -16,6 +17,19 @@ import { usePipeline } from "./usePipeline";
 const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 
 type TerrainState = "idle" | "loading" | "ok" | "error";
+
+interface AppChart {
+  id: string;
+  name: string;
+  image: ImageBitmap;
+  placement: ChartPlacement;
+  elevationM: number;
+  visible: boolean;
+}
+
+const DEG2RAD = Math.PI / 180;
+const isImageFile = (f: File) =>
+  f.type.startsWith("image/") || /\.png$/i.test(f.name);
 
 export default function App() {
   const { loadTrackFile, loadTerrain } = usePipeline();
@@ -44,6 +58,9 @@ export default function App() {
   const [cutStart, setCutStart] = useState(0);
   const [cutEnd, setCutEnd] = useState(0);
   const [cutMode, setCutMode] = useState<CutMode>("trim");
+
+  // Karten-Overlays (Anflugkarten).
+  const [charts, setCharts] = useState<AppChart[]>([]);
 
   // Cuts auf den Basistrack anwenden (rein, schnell → Main-Thread).
   const cutResult = useMemo(
@@ -99,6 +116,7 @@ export default function App() {
           setTrack(td);
           setSatellites(sat);
           setCuts([]); // Cuts beim Laden einer neuen Datei zuruecksetzen
+          setCharts([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -111,23 +129,93 @@ export default function App() {
     [loadTrackFile],
   );
 
+  // PNG-Karte importieren: anfangs zentriert auf die Track-Bounds platziert.
+  const addChartFromFile = useCallback(
+    async (file: File) => {
+      if (!track) {
+        setError("Erst einen Track laden, dann eine Karte hinzufügen.");
+        return;
+      }
+      const image = await createImageBitmap(file);
+      const b = track.meta.bounds;
+      const centerLon = (b.lon_min + b.lon_max) / 2;
+      const centerLat = (b.lat_min + b.lat_max) / 2;
+      const mpLon = 111320 * Math.cos(centerLat * DEG2RAD);
+      const bboxW = (b.lon_max - b.lon_min) * mpLon;
+      const widthM = Math.max(300, bboxW * 0.5 || 1000);
+      const heightM = widthM * (image.height / Math.max(image.width, 1));
+      setCharts((cs) => [
+        ...cs,
+        {
+          id: `${Date.now()}-${cs.length}`,
+          name: file.name.replace(/\.[^.]+$/, ""),
+          image,
+          placement: { centerLon, centerLat, widthM, heightM, rotationDeg: 0 },
+          elevationM: 0,
+          visible: true,
+        },
+      ]);
+    },
+    [track],
+  );
+
+  const dispatchFile = useCallback(
+    (file: File) => {
+      if (isImageFile(file)) void addChartFromFile(file);
+      else void handleFile(file);
+    },
+    [addChartFromFile, handleFile],
+  );
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
       const file = e.dataTransfer.files?.[0];
-      if (file) void handleFile(file);
+      if (file) dispatchFile(file);
     },
-    [handleFile],
+    [dispatchFile],
   );
 
   const onInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) void handleFile(file);
+      if (file) dispatchFile(file);
       e.target.value = ""; // erneutes Laden derselben Datei erlauben
     },
-    [handleFile],
+    [dispatchFile],
+  );
+
+  // Fuer den Viewer: sichtbare Karten → Overlay (Eckkoordinaten) + Bild.
+  const placedCharts = useMemo<PlacedChart[]>(
+    () =>
+      charts
+        .filter((c) => c.visible)
+        .map((c) => ({
+          overlay: {
+            name: c.name,
+            ...placementToCorners(c.placement),
+            elevation_m: c.elevationM,
+          },
+          image: c.image,
+        })),
+    [charts],
+  );
+
+  // Hilfsfunktion: eine Karte im State patchen.
+  const patchChart = useCallback(
+    (id: string, patch: Partial<AppChart> | { placement: Partial<ChartPlacement> }) => {
+      setCharts((cs) =>
+        cs.map((c) => {
+          if (c.id !== id) return c;
+          if ("placement" in patch && patch.placement) {
+            return { ...c, placement: { ...c.placement, ...patch.placement } };
+          }
+          return { ...c, ...(patch as Partial<AppChart>) };
+        }),
+      );
+    },
+    [],
   );
 
   // Nur wenn Terrain sichtbar ist, gibt es einen Boden fuer above_terrain/AGL.
@@ -179,7 +267,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".gpx,.kml,.nmea,.log,.txt,application/gpx+xml,application/vnd.google-earth.kml+xml,text/xml"
+        accept=".gpx,.kml,.nmea,.log,.txt,.png,application/gpx+xml,application/vnd.google-earth.kml+xml,text/xml,image/png"
         style={{ display: "none" }}
         onChange={onInputChange}
       />
@@ -233,6 +321,7 @@ export default function App() {
               colorMode={effColorMode}
               showCurtain={showCurtain}
               zScale={zScale}
+              charts={placedCharts}
             />
             <div style={togglesStyle}>
               <Segmented<ColorMode>
@@ -324,6 +413,28 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* Karten-Overlays: PNG droppen, dann numerisch platzieren. */}
+              <div style={cutBoxStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ color: "#888", fontSize: 11 }}>
+                    Karten ({charts.length})
+                  </span>
+                  <button style={btnStyle} onClick={() => fileInputRef.current?.click()}>
+                    PNG…
+                  </button>
+                </div>
+                {charts.map((c) => (
+                  <ChartControls
+                    key={c.id}
+                    chart={c}
+                    onPatch={(patch) => patchChart(c.id, patch)}
+                    onRemove={() =>
+                      setCharts((cs) => cs.filter((x) => x.id !== c.id))
+                    }
+                  />
+                ))}
+              </div>
             </div>
           </>
         ) : (
@@ -423,6 +534,70 @@ function Segmented<T extends string | boolean>({
           {label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function LabeledNum({
+  label,
+  value,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#999" }}>
+      <span style={{ width: 56 }}>{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ ...numStyle, width: 90 }}
+      />
+    </label>
+  );
+}
+
+function ChartControls({
+  chart,
+  onPatch,
+  onRemove,
+}: {
+  chart: AppChart;
+  onPatch: (patch: Partial<AppChart> | { placement: Partial<ChartPlacement> }) => void;
+  onRemove: () => void;
+}) {
+  const p = chart.placement;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, borderTop: "1px solid #2a2a2a", paddingTop: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 11, color: "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {chart.name}
+        </span>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button
+            style={chart.visible ? btnActiveStyle : btnStyle}
+            onClick={() => onPatch({ visible: !chart.visible })}
+            title="Sichtbar"
+          >
+            {chart.visible ? "👁" : "—"}
+          </button>
+          <button style={btnStyle} onClick={onRemove} title="Entfernen">
+            ✕
+          </button>
+        </div>
+      </div>
+      <LabeledNum label="Lon" value={p.centerLon} step={0.0005} onChange={(v) => onPatch({ placement: { centerLon: v } })} />
+      <LabeledNum label="Lat" value={p.centerLat} step={0.0005} onChange={(v) => onPatch({ placement: { centerLat: v } })} />
+      <LabeledNum label="Breite m" value={Math.round(p.widthM)} step={50} onChange={(v) => onPatch({ placement: { widthM: v } })} />
+      <LabeledNum label="Höhe m" value={Math.round(p.heightM)} step={50} onChange={(v) => onPatch({ placement: { heightM: v } })} />
+      <LabeledNum label="Rot °" value={p.rotationDeg} step={5} onChange={(v) => onPatch({ placement: { rotationDeg: v } })} />
+      <LabeledNum label="Elev m" value={chart.elevationM} step={10} onChange={(v) => onPatch({ elevationM: v })} />
     </div>
   );
 }
