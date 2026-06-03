@@ -1,14 +1,12 @@
 // ---------------------------------------------------------------------------
-// App-Shell fuer den Phase-3-Durchstich: GPX per Drag & Drop oder Dateiwahl
-// laden → Pipeline im Worker → 3D-Track im Viewer.
-//
-// Bewusst minimal: nur GPX, nur Geschwindigkeits-/Hoehenfarbe, Vorhang an/aus,
-// Z-Ueberhoehung. Bibliothek, Terrain, Karten, NMEA etc. folgen spaeter.
+// App-Shell: GPX/KML/NMEA per Drag & Drop laden → Pipeline im Worker →
+// 3D-Track + Terrain + (NMEA) Satelliten-SkyPlot, mit Cuts.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
+import { applyCuts, type CutMode, type CutSpec } from "../pipeline";
 import { enrichTrackWithTerrain } from "../pipeline/terrain";
 import { TrackViewer } from "../viewer/TrackViewer";
 import { SkyPlot } from "../viewer/SkyPlot";
@@ -40,6 +38,24 @@ export default function App() {
   useEffect(() => {
     setActiveIdx(0);
   }, [track]);
+
+  // Cuts (gegen die Original-Track-Indizes) + Formularzustand.
+  const [cuts, setCuts] = useState<CutSpec[]>([]);
+  const [cutStart, setCutStart] = useState(0);
+  const [cutEnd, setCutEnd] = useState(0);
+  const [cutMode, setCutMode] = useState<CutMode>("trim");
+
+  // Cuts auf den Basistrack anwenden (rein, schnell → Main-Thread).
+  const cutResult = useMemo(
+    () =>
+      track
+        ? applyCuts(track, satellites, cuts)
+        : { track: null, satellites: null, derivation: null },
+    [track, satellites, cuts],
+  );
+  const displayTrack = cutResult.track;
+  const displaySatellites = cutResult.satellites;
+  const derivation = cutResult.derivation;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -82,6 +98,7 @@ export default function App() {
         } else {
           setTrack(td);
           setSatellites(sat);
+          setCuts([]); // Cuts beim Laden einer neuen Datei zuruecksetzen
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -119,9 +136,17 @@ export default function App() {
   // Track mit Terrain anreichern (above_terrain, track_mode) — fuer Tooltip
   // und Flug/Boden-Anzeige. Ohne Terrain bleibt der Originaltrack.
   const viewTrack = useMemo(
-    () => (track && activeDem ? enrichTrackWithTerrain(track, activeDem) : track),
-    [track, activeDem],
+    () =>
+      displayTrack && activeDem
+        ? enrichTrackWithTerrain(displayTrack, activeDem)
+        : displayTrack,
+    [displayTrack, activeDem],
   );
+
+  // activeIdx auf die (ggf. durch Cuts verkuerzte) Laenge begrenzen.
+  const safeIdx = viewTrack
+    ? Math.min(activeIdx, Math.max(0, viewTrack.meta.n_points - 1))
+    : 0;
 
   // Flug-/Drohnen-Farbmodi nur mit Terrain. Ist Terrain aus, faellt ein
   // aktiver flight/drone-Modus auf Speed zurueck.
@@ -177,6 +202,27 @@ export default function App() {
         </div>
       )}
 
+      {derivation && (
+        <div
+          style={{
+            padding: "6px 16px",
+            fontSize: 12,
+            flexShrink: 0,
+            background: derivation.severity === "warn" ? "#3a1f1f" : "#1f2a3a",
+            color: derivation.severity === "warn" ? "#f4c0c0" : "#bcd",
+            borderBottom: "1px solid #2a2a2a",
+          }}
+        >
+          {derivation.severity === "warn" ? "⚠ " : "ℹ "}
+          {derivation.message} ({derivation.n_points_removed} Punkte entfernt
+          {derivation.total_time_shift_s !== undefined &&
+            `, Zeit ${derivation.total_time_shift_s >= 0 ? "−" : "+"}${Math.abs(
+              derivation.total_time_shift_s,
+            ).toFixed(0)} s`}
+          )
+        </div>
+      )}
+
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
         {viewTrack ? (
@@ -223,6 +269,61 @@ export default function App() {
                   </button>
                 ))}
               </div>
+
+              {/* Cut-Werkzeug: Bereich (Original-Indizes) + Modus → Schneiden. */}
+              {track && (
+                <div style={cutBoxStyle}>
+                  <div style={{ color: "#888", fontSize: 11 }}>
+                    Schnitt (Index 0–{track.meta.n_points - 1})
+                  </div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input
+                      type="number"
+                      min={0}
+                      max={track.meta.n_points - 1}
+                      value={cutStart}
+                      onChange={(e) => setCutStart(Number(e.target.value))}
+                      style={numStyle}
+                    />
+                    <span style={{ color: "#888" }}>–</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={track.meta.n_points - 1}
+                      value={cutEnd}
+                      onChange={(e) => setCutEnd(Number(e.target.value))}
+                      style={numStyle}
+                    />
+                  </div>
+                  <Segmented<CutMode>
+                    value={cutMode}
+                    options={[
+                      ["trim", "Trim"],
+                      ["gap", "Lücke"],
+                      ["synthetic", "Privacy"],
+                    ]}
+                    onChange={setCutMode}
+                  />
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      style={btnStyle}
+                      onClick={() =>
+                        setCuts((cs) => [
+                          ...cs,
+                          { start: cutStart, end: cutEnd, mode: cutMode },
+                        ])
+                      }
+                    >
+                      Schneiden
+                    </button>
+                    {cuts.length > 0 && (
+                      <button style={btnStyle} onClick={() => setCuts([])}>
+                        Zurücksetzen ({cuts.length})
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -235,32 +336,32 @@ export default function App() {
         )}
         </div>
 
-        {viewTrack && satellites && (
+        {viewTrack && displaySatellites && (
           <div style={sidePanelStyle}>
             <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
               Satellitenkonstellation
             </div>
-            <SkyPlot satData={satellites} trackIdx={activeIdx} />
+            <SkyPlot satData={displaySatellites} trackIdx={safeIdx} />
             <div style={{ color: "#556", fontSize: 10, marginTop: 6 }}>
-              {satellites.talkers.join(" / ")}
+              {displaySatellites.talkers.join(" / ")}
             </div>
           </div>
         )}
       </div>
 
-      {viewTrack && satellites && (
+      {viewTrack && displaySatellites && (
         <div style={sliderStyle}>
           <input
             type="range"
             min={0}
             max={Math.max(0, viewTrack.meta.n_points - 1)}
-            value={activeIdx}
+            value={safeIdx}
             onChange={(e) => setActiveIdx(Number(e.target.value))}
             style={{ flex: 1 }}
           />
           <span style={{ color: "#888", fontSize: 11, minWidth: 200, textAlign: "right" }}>
-            Punkt {activeIdx + 1}/{viewTrack.meta.n_points} ·{" "}
-            {formatTimestamp(viewTrack.points.timestamp_ms[activeIdx])}
+            Punkt {safeIdx + 1}/{viewTrack.meta.n_points} ·{" "}
+            {formatTimestamp(viewTrack.points.timestamp_ms[safeIdx])}
           </span>
         </div>
       )}
@@ -364,6 +465,24 @@ const sliderStyle: React.CSSProperties = {
   background: "#181818",
   borderTop: "1px solid #2a2a2a",
   flexShrink: 0,
+};
+const cutBoxStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  padding: 6,
+  background: "rgba(20,20,20,0.7)",
+  border: "1px solid #333",
+  borderRadius: 4,
+};
+const numStyle: React.CSSProperties = {
+  width: 64,
+  background: "#222",
+  color: "#ccc",
+  border: "1px solid #333",
+  borderRadius: 4,
+  padding: "3px 4px",
+  fontSize: 12,
 };
 const togglesStyle: React.CSSProperties = {
   position: "absolute",

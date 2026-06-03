@@ -16,6 +16,8 @@ import { buildTrackData } from "./processing/track-model";
 
 export type { TrackData, SatelliteData } from "../types";
 export type { RawTrackPoint, EnrichedTrackPoint } from "./types";
+export { applyCuts } from "./processing/cuts";
+export type { CutMode, CutSpec, CutResult, Derivation } from "./processing/cuts";
 
 /** Ergebnis der NMEA-Pipeline: Track plus optionale Satellitendaten. */
 export interface NmeaResult {
