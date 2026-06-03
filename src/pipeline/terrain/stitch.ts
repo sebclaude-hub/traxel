@@ -13,7 +13,6 @@
 
 import type { DemGrid, TrackBounds } from "../../types";
 import type { DecodedTile } from "./terrarium";
-import { latToTileY, lonToTileX } from "./tiles";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -159,6 +158,3 @@ export function paddedBounds(
     lat_max: bounds.lat_max + pad,
   };
 }
-
-// Referenz fuer Tests: Kachelindex einer Koordinate (re-exportiert).
-export { latToTileY, lonToTileX };

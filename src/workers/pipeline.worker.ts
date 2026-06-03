@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { processGpx } from "../pipeline";
-import { buildTerrain } from "../pipeline/terrain/build";
+import { buildTerrain } from "../pipeline/terrain";
 import type { DemGrid, TrackBounds, TrackData } from "../types";
 
 export type PipelineRequest =
