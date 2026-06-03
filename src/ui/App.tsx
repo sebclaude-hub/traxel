@@ -61,6 +61,7 @@ export default function App() {
 
   // Karten-Overlays (Anflugkarten).
   const [charts, setCharts] = useState<AppChart[]>([]);
+  const [editChartId, setEditChartId] = useState<string | null>(null);
 
   // Cuts auf den Basistrack anwenden (rein, schnell → Main-Thread).
   const cutResult = useMemo(
@@ -117,6 +118,7 @@ export default function App() {
           setSatellites(sat);
           setCuts([]); // Cuts beim Laden einer neuen Datei zuruecksetzen
           setCharts([]);
+          setEditChartId(null);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -201,6 +203,17 @@ export default function App() {
         })),
     [charts],
   );
+
+  // Aktuell bearbeitete Karte → Griffe im Viewer.
+  const editChart = useMemo(() => {
+    const c = charts.find((x) => x.id === editChartId);
+    if (!c) return null;
+    return {
+      placement: c.placement,
+      onChange: (p: ChartPlacement) =>
+        setCharts((cs) => cs.map((x) => (x.id === c.id ? { ...x, placement: p } : x))),
+    };
+  }, [charts, editChartId]);
 
   // Hilfsfunktion: eine Karte im State patchen.
   const patchChart = useCallback(
@@ -322,6 +335,7 @@ export default function App() {
               showCurtain={showCurtain}
               zScale={zScale}
               charts={placedCharts}
+              editChart={editChart}
             />
             <div style={togglesStyle}>
               <Segmented<ColorMode>
@@ -428,10 +442,15 @@ export default function App() {
                   <ChartControls
                     key={c.id}
                     chart={c}
-                    onPatch={(patch) => patchChart(c.id, patch)}
-                    onRemove={() =>
-                      setCharts((cs) => cs.filter((x) => x.id !== c.id))
+                    editing={editChartId === c.id}
+                    onToggleEdit={() =>
+                      setEditChartId((id) => (id === c.id ? null : c.id))
                     }
+                    onPatch={(patch) => patchChart(c.id, patch)}
+                    onRemove={() => {
+                      setCharts((cs) => cs.filter((x) => x.id !== c.id));
+                      setEditChartId((id) => (id === c.id ? null : id));
+                    }}
                   />
                 ))}
               </div>
@@ -565,10 +584,14 @@ function LabeledNum({
 
 function ChartControls({
   chart,
+  editing,
+  onToggleEdit,
   onPatch,
   onRemove,
 }: {
   chart: AppChart;
+  editing: boolean;
+  onToggleEdit: () => void;
   onPatch: (patch: Partial<AppChart> | { placement: Partial<ChartPlacement> }) => void;
   onRemove: () => void;
 }) {
@@ -581,6 +604,13 @@ function ChartControls({
         </span>
         <div style={{ display: "flex", gap: 4 }}>
           <button
+            style={editing ? btnActiveStyle : btnStyle}
+            onClick={onToggleEdit}
+            title="Im 3D-Bild verschieben/skalieren/rotieren"
+          >
+            ✥
+          </button>
+          <button
             style={chart.visible ? btnActiveStyle : btnStyle}
             onClick={() => onPatch({ visible: !chart.visible })}
             title="Sichtbar"
@@ -592,6 +622,11 @@ function ChartControls({
           </button>
         </div>
       </div>
+      {editing && (
+        <div style={{ fontSize: 10, color: "#5a7" }}>
+          Griffe: Mitte = verschieben, Ecke = drehen + skalieren
+        </div>
+      )}
       <LabeledNum label="Lon" value={p.centerLon} step={0.0005} onChange={(v) => onPatch({ placement: { centerLon: v } })} />
       <LabeledNum label="Lat" value={p.centerLat} step={0.0005} onChange={(v) => onPatch({ placement: { centerLat: v } })} />
       <LabeledNum label="Breite m" value={Math.round(p.widthM)} step={50} onChange={(v) => onPatch({ placement: { widthM: v } })} />

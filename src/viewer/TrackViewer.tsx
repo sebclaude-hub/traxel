@@ -6,22 +6,34 @@
 // Offset-Slider und Satelliten. Die kommen in spaeteren Phasen dazu.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import DeckGL from "deck.gl";
 import { MapView } from "@deck.gl/core";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 
+import { sampleDem } from "../pipeline/terrain/sample";
 import type { ColorMode, DemGrid, TrackData } from "../types";
 import { buildCurtainSegments, makeCurtainLayer } from "./curtainLayer";
 import { makeTerrainLayer } from "./terrainLayer";
 import { makeChartLayer } from "./chartLayer";
 import type { ChartOverlay } from "./chartMesh";
+import {
+  cornerDragToPlacement,
+  placementToCorners,
+  type ChartPlacement,
+} from "./chartPlacement";
 import { computeRankPositions, plasmaColor, type Rgba } from "./colorMap";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
 export interface PlacedChart {
   overlay: ChartOverlay;
   image: ImageBitmap | HTMLImageElement;
+}
+
+/** Aktuell bearbeitete Karte: Platzierung + Aenderungs-Callback fuer die Griffe. */
+export interface EditChart {
+  placement: ChartPlacement;
+  onChange: (p: ChartPlacement) => void;
 }
 
 interface Props {
@@ -31,6 +43,7 @@ interface Props {
   showCurtain: boolean;
   zScale: number;
   charts?: PlacedChart[];
+  editChart?: EditChart | null;
 }
 
 interface DeckViewState {
@@ -63,10 +76,15 @@ function minAlt(alts: (number | null)[]): number {
   return Number.isFinite(min) ? min : 0;
 }
 
-export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts = [] }: Props) {
+export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts = [], editChart = null }: Props) {
   const [viewState, setViewState] = useState<DeckViewState>(() =>
     buildInitialViewState(track),
   );
+
+  // Drag-Zustand der Karten-Griffe. baseRef haelt die Platzierung beim
+  // Drag-Start fest (stabile Skalierung beim Eck-Griff).
+  const [handleDragging, setHandleDragging] = useState(false);
+  const dragRef = useRef<{ kind: "center" | "corner"; base: ChartPlacement } | null>(null);
 
   const altBase = useMemo(() => minAlt(track.points.alt), [track]);
   const exagAlt = useCallback(
@@ -159,8 +177,40 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
       }),
     );
 
+    // Georeferenzier-Griffe der aktuell bearbeiteten Karte (zuoberst).
+    if (editChart) {
+      const pl = editChart.placement;
+      const tr = placementToCorners(pl).corner_tr;
+      const zAt = (lon: number, lat: number) => {
+        const terr = dem ? sampleDem(dem, lon, lat) ?? 0 : 0;
+        return altBase + (terr - altBase) * zScale + 60; // ueber der Karte
+      };
+      const handles = [
+        { kind: "center", position: [pl.centerLon, pl.centerLat, zAt(pl.centerLon, pl.centerLat)], color: [230, 80, 230, 255] },
+        { kind: "corner", position: [tr[0], tr[1], zAt(tr[0], tr[1])], color: [255, 220, 40, 255] },
+      ];
+      result.push(
+        new ScatterplotLayer<{ kind: string; position: number[]; color: number[] }>({
+          id: "chart-handles",
+          data: handles,
+          getPosition: (d) => d.position as [number, number, number],
+          getFillColor: (d) => d.color as [number, number, number, number],
+          getRadius: 13,
+          radiusUnits: "pixels",
+          stroked: true,
+          getLineColor: [255, 255, 255, 255],
+          lineWidthMinPixels: 2,
+          pickable: true,
+          // Immer obenauf, damit die Griffe nicht hinter Terrain-Graten
+          // verschwinden (und gut greifbar bleiben).
+          parameters: { depthCompare: "always" },
+          updateTriggers: { getPosition: [editChart, zScale, altBase, dem] },
+        }),
+      );
+    }
+
     return result;
-  }, [dem, charts, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase]);
+  }, [dem, charts, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase, editChart]);
 
   // deck.gl-Callback-Typen (ViewStateChangeParameters/PickingInfo) passen nicht
   // auf eine handgeschnittene Form — wie im Ursprungs-Viewer `any`.
@@ -204,13 +254,49 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
     [track],
   );
 
+  // Drag der Karten-Griffe (auf DeckGL-Ebene; true zurueckgeben stoppt das Pan).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onDragStart = useCallback(
+    (info: any) => {
+      if (editChart && info?.object && info.layer?.id === "chart-handles") {
+        dragRef.current = { kind: info.object.kind, base: editChart.placement };
+        setHandleDragging(true);
+        return true;
+      }
+      return false;
+    },
+    [editChart],
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onDrag = useCallback(
+    (info: any) => {
+      const d = dragRef.current;
+      if (!d || !editChart || !info?.coordinate) return false;
+      const [lon, lat] = info.coordinate;
+      if (d.kind === "center") {
+        editChart.onChange({ ...d.base, centerLon: lon, centerLat: lat });
+      } else {
+        editChart.onChange(cornerDragToPlacement(d.base, lon, lat));
+      }
+      return true;
+    },
+    [editChart],
+  );
+  const onDragEnd = useCallback(() => {
+    dragRef.current = null;
+    setHandleDragging(false);
+  }, []);
+
   return (
     <DeckGL
       views={new MapView({ id: "map", repeat: false })}
       viewState={viewState}
-      controller={{ dragRotate: true, touchRotate: true }}
+      controller={{ dragRotate: true, touchRotate: true, dragPan: !handleDragging }}
       layers={layers}
       onViewStateChange={handleViewStateChange}
+      onDragStart={onDragStart}
+      onDrag={onDrag}
+      onDragEnd={onDragEnd}
       getTooltip={getTooltip}
       style={{ position: "relative", width: "100%", height: "100%" }}
     >

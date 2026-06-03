@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { placementToCorners } from "./chartPlacement";
+import { cornerDragToPlacement, placementToCorners, type ChartPlacement } from "./chartPlacement";
 
 describe("placementToCorners", () => {
   it("ist bei Rotation 0 achsenparallel und korrekt dimensioniert", () => {
@@ -56,5 +56,41 @@ describe("placementToCorners", () => {
     const lat = (c.corner_tl[1] + c.corner_tr[1] + c.corner_bl[1] + c.corner_br[1]) / 4;
     expect(lon).toBeCloseTo(8, 9);
     expect(lat).toBeCloseTo(47, 9);
+  });
+});
+
+describe("cornerDragToPlacement", () => {
+  const base: ChartPlacement = {
+    centerLon: 10,
+    centerLat: 50,
+    widthM: 2000,
+    heightM: 1000,
+    rotationDeg: 0,
+  };
+
+  it("ist die Inverse von placementToCorners (Ziehen auf die TR-Ecke = keine Aenderung)", () => {
+    const tr = placementToCorners(base).corner_tr;
+    const out = cornerDragToPlacement(base, tr[0], tr[1]);
+    expect(out.widthM).toBeCloseTo(2000, 3);
+    expect(out.heightM).toBeCloseTo(1000, 3);
+    expect(out.rotationDeg).toBeCloseTo(0, 6);
+  });
+
+  it("liest die Rotation aus der TR-Eck-Position (45°)", () => {
+    const rotated = placementToCorners({ ...base, rotationDeg: 45 }).corner_tr;
+    const out = cornerDragToPlacement(base, rotated[0], rotated[1]);
+    expect(out.rotationDeg).toBeCloseTo(45, 4);
+    expect(out.widthM).toBeCloseTo(2000, 2);
+  });
+
+  it("skaliert gleichmaessig mit der Distanz (doppelt so weit → doppelt so gross)", () => {
+    const tr = placementToCorners(base).corner_tr;
+    // Cursor doppelt so weit vom Zentrum entfernt.
+    const farLon = base.centerLon + (tr[0] - base.centerLon) * 2;
+    const farLat = base.centerLat + (tr[1] - base.centerLat) * 2;
+    const out = cornerDragToPlacement(base, farLon, farLat);
+    expect(out.widthM).toBeCloseTo(4000, 1);
+    expect(out.heightM).toBeCloseTo(2000, 1);
+    expect(out.rotationDeg).toBeCloseTo(0, 4);
   });
 });
