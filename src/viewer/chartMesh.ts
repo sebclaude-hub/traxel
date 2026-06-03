@@ -2,12 +2,43 @@
 // chartMesh — gedraptes Mesh fuer ein Karten-Overlay (Port aus
 // gps_viewer/src/utils/chartMesh.ts).
 //
-// Strategie A: bei DEM + achsenparalleler Karte exakt die DEM-Vertices in den
-// Bounds wiederverwenden (kein Z-Konflikt mit dem Terrain).
-// Strategie B (Fallback): bilineare Eck-Interpolation mit adaptiver
-// Subdivision, DEM pro Vertex gesampelt, kleiner Z-Lift.
+// DAS VERTEX-/TRIANGLE-PROBLEM (warum es zwei Pfade gibt)
+// ------------------------------------------------------
+// Ein DEM-Quad wird in ZWEI Dreiecke geteilt — entlang einer Diagonale. Baut
+// die Karte ihr EIGENES Gitter (frueher "Strategie B", bilineare Ecken), dann
+// laufen ihre Diagonalen anders als die des Terrains. Selbst bei identischen
+// Hoehen an den Eckpunkten interpolieren die beiden Flaechen INNERHALB eines
+// Quads ueber verschiedene Diagonalen → sie kreuzen sich, und das Terrain-
+// Dreieck ragt KONSISTENT auf einer Seite jeder Erhebung durch die Karte
+// ("immer dieselbe Seite der Gipfel"). Kein Z-Lift behebt das zuverlaessig
+// (ein scharfer Grat ragt beliebig weit).
+//
+// LOESUNG: Liegt ein DEM vor, baut die Karte IMMER (auch gedreht) auf den
+// ECHTEN DEM-Vertices auf (buildFromTerrainSubgrid) — identische Positionen
+// UND identische Triangulation (gleiche Iterations-/Index-Reihenfolge wie
+// demMesh.ts). Damit sind Chart- und Terrain-Flaeche mathematisch gleich,
+// Durchstoßen ist konstruktionsbedingt unmoeglich. Die UV werden aus den vier
+// Eckkoordinaten abgeleitet (Parallelogramm-Inverse) und funktionieren bei
+// beliebiger Rotation/Skalierung. WICHTIG: Die Index-Reihenfolge hier MUSS mit
+// demMesh.ts uebereinstimmen (tl,bl,tr / tr,bl,br), sonst sind die Diagonalen
+// wieder versetzt.
+//
+// Bilinearer Pfad (buildFromBilinearCorners) bleibt nur fuer den Fall OHNE DEM
+// (flach) oder bei erzwungener Subdivision.
 //
 // Positionen sind Meter-Offsets vom Bounds-Zentrum (Anker), wie demMesh/curtain.
+//
+// OFFENER BUG (TODO, gemeldet beim Drehen): Der Subgrid deckt die ACHSEN-
+// PARALLELE Bounding-Box der (gedrehten) Karte ab. Vertices ausserhalb des
+// gedrehten Rechtecks bekommen UV ausserhalb [0,1] und werden via 1px-
+// Transparenzrand + clamp-to-edge farblich transparent — ABER diese Dreiecke
+// schreiben weiterhin in den Tiefenpuffer und verdecken dadurch, was dahinter
+// liegt → sichtbar als schwacher "Schatten" in Form der Bounding-Box um die
+// gedrehte Karte. Loesungsideen fuer morgen:
+//   (a) voll transparente Fragmente verwerfen / Depth-Write fuer den Chart-
+//       Layer abschalten (chartLayer parameters), ODER
+//   (b) das Mesh auf das gedrehte Rechteck CLIPPEN (nur Zellen mit Vertex im
+//       Quad emittieren / Randzellen beschneiden) — dann kein Overhang.
 // ---------------------------------------------------------------------------
 
 import { sampleDem } from "../pipeline/terrain/sample";
