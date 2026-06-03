@@ -9,6 +9,7 @@
 import type { TrackData } from "../types";
 import { parseGpx } from "./parsing/gpx";
 import { parseKml } from "./parsing/kml";
+import { messagesToTrack, parseNmeaMessages } from "./parsing/nmea";
 import { enrichSpeed } from "./processing/enrich";
 import { buildTrackData } from "./processing/track-model";
 
@@ -38,4 +39,17 @@ export function processKml(xml: string, name: string): TrackData {
   const raw = parseKml(xml);
   const enriched = enrichSpeed(raw);
   return buildTrackData(enriched, { name, sourceType: "kml" });
+}
+
+/**
+ * Volle NMEA-Pipeline: Saetze parsen → konsolidieren → Schema B → anreichern
+ * → TrackData. (Satelliten/SkyPlot folgen separat.)
+ *
+ * @param text NMEA-Logfile-Inhalt.
+ * @param name Anzeigename des Tracks im Viewer.
+ */
+export function processNmea(text: string, name: string): TrackData {
+  const messages = parseNmeaMessages(text);
+  const enriched = enrichSpeed(messagesToTrack(messages));
+  return buildTrackData(enriched, { name, sourceType: "nmea" });
 }

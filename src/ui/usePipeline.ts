@@ -71,9 +71,16 @@ export function usePipeline() {
       const text = await file.text();
       const name = file.name.replace(/\.[^.]+$/, "");
       const ext = file.name.split(".").pop()?.toLowerCase();
-      const kind = ext === "kml" ? "kml" : "gpx";
+      const kind =
+        ext === "kml"
+          ? "kml"
+          : ext === "nmea" || ext === "log" || ext === "txt"
+            ? "nmea"
+            : "gpx";
       const res = await post({ kind, text, name });
-      if (res.ok && (res.kind === "gpx" || res.kind === "kml")) return res.track;
+      if (res.ok && (res.kind === "gpx" || res.kind === "kml" || res.kind === "nmea")) {
+        return res.track;
+      }
       throw new Error("Unerwartete Antwort fuer Track-Anfrage");
     },
     [post],
