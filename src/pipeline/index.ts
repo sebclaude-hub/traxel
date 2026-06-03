@@ -6,15 +6,22 @@
 // `TrackData` direkt im Speicher statt JSON auf der Platte.
 // ---------------------------------------------------------------------------
 
-import type { TrackData } from "../types";
+import type { SatelliteData, TrackData } from "../types";
 import { parseGpx } from "./parsing/gpx";
 import { parseKml } from "./parsing/kml";
+import { buildSatelliteData } from "./parsing/nmea-gsv";
 import { messagesToTrack, parseNmeaMessages } from "./parsing/nmea";
 import { enrichSpeed } from "./processing/enrich";
 import { buildTrackData } from "./processing/track-model";
 
-export type { TrackData } from "../types";
+export type { TrackData, SatelliteData } from "../types";
 export type { RawTrackPoint, EnrichedTrackPoint } from "./types";
+
+/** Ergebnis der NMEA-Pipeline: Track plus optionale Satellitendaten. */
+export interface NmeaResult {
+  track: TrackData;
+  satellites: SatelliteData | null;
+}
 
 /**
  * Volle GPX-Pipeline: parsen → Schema B → anreichern → Schema C → TrackData.
@@ -48,8 +55,11 @@ export function processKml(xml: string, name: string): TrackData {
  * @param text NMEA-Logfile-Inhalt.
  * @param name Anzeigename des Tracks im Viewer.
  */
-export function processNmea(text: string, name: string): TrackData {
+export function processNmea(text: string, name: string): NmeaResult {
   const messages = parseNmeaMessages(text);
   const enriched = enrichSpeed(messagesToTrack(messages));
-  return buildTrackData(enriched, { name, sourceType: "nmea" });
+  const track = buildTrackData(enriched, { name, sourceType: "nmea" });
+  const satellites = buildSatelliteData(messages, track.points.timestamp_ms);
+  if (satellites) track.meta.has_satellites = true;
+  return { track, satellites };
 }

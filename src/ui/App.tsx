@@ -8,10 +8,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ColorMode, DemGrid, TrackData } from "../types";
+import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
 import { enrichTrackWithTerrain } from "../pipeline/terrain";
 import { TrackViewer } from "../viewer/TrackViewer";
-import { formatDistance, formatDuration } from "../viewer/formatters";
+import { SkyPlot } from "../viewer/SkyPlot";
+import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
 
 const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
@@ -21,6 +22,7 @@ type TerrainState = "idle" | "loading" | "ok" | "error";
 export default function App() {
   const { loadTrackFile, loadTerrain } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
+  const [satellites, setSatellites] = useState<SatelliteData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -32,6 +34,12 @@ export default function App() {
   const [dem, setDem] = useState<DemGrid | null>(null);
   const [terrainState, setTerrainState] = useState<TerrainState>("idle");
   const [showTerrain, setShowTerrain] = useState(true);
+
+  // Aktiver Trackpunkt (steuert den SkyPlot). Bei Trackwechsel zurueck auf 0.
+  const [activeIdx, setActiveIdx] = useState(0);
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [track]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,16 +74,19 @@ export default function App() {
       setLoading(true);
       setError(null);
       try {
-        const td = await loadTrackFile(file);
+        const { track: td, satellites: sat } = await loadTrackFile(file);
         if (td.meta.n_points === 0) {
           setError("Keine gueltigen Trackpunkte in der Datei.");
           setTrack(null);
+          setSatellites(null);
         } else {
           setTrack(td);
+          setSatellites(sat);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setTrack(null);
+        setSatellites(null);
       } finally {
         setLoading(false);
       }
@@ -166,7 +177,8 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
         {viewTrack ? (
           <>
             <TrackViewer
@@ -221,7 +233,37 @@ export default function App() {
             onPick={() => fileInputRef.current?.click()}
           />
         )}
+        </div>
+
+        {viewTrack && satellites && (
+          <div style={sidePanelStyle}>
+            <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
+              Satellitenkonstellation
+            </div>
+            <SkyPlot satData={satellites} trackIdx={activeIdx} />
+            <div style={{ color: "#556", fontSize: 10, marginTop: 6 }}>
+              {satellites.talkers.join(" / ")}
+            </div>
+          </div>
+        )}
       </div>
+
+      {viewTrack && satellites && (
+        <div style={sliderStyle}>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(0, viewTrack.meta.n_points - 1)}
+            value={activeIdx}
+            onChange={(e) => setActiveIdx(Number(e.target.value))}
+            style={{ flex: 1 }}
+          />
+          <span style={{ color: "#888", fontSize: 11, minWidth: 200, textAlign: "right" }}>
+            Punkt {activeIdx + 1}/{viewTrack.meta.n_points} ·{" "}
+            {formatTimestamp(viewTrack.points.timestamp_ms[activeIdx])}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -301,6 +343,26 @@ const headerStyle: React.CSSProperties = {
   padding: "6px 16px",
   background: "#181818",
   borderBottom: "1px solid #2a2a2a",
+  flexShrink: 0,
+};
+const sidePanelStyle: React.CSSProperties = {
+  width: 300,
+  flexShrink: 0,
+  background: "#111",
+  borderLeft: "1px solid #2a2a2a",
+  padding: 16,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  overflowY: "auto",
+};
+const sliderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  padding: "8px 16px",
+  background: "#181818",
+  borderTop: "1px solid #2a2a2a",
   flexShrink: 0,
 };
 const togglesStyle: React.CSSProperties = {

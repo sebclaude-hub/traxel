@@ -8,11 +8,16 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-import type { DemGrid, TrackBounds, TrackData } from "../types";
+import type { DemGrid, SatelliteData, TrackBounds, TrackData } from "../types";
 import type {
   PipelineRequest,
   PipelineResponse,
 } from "../workers/pipeline.worker";
+
+export interface LoadedTrack {
+  track: TrackData;
+  satellites: SatelliteData | null;
+}
 
 type Pending = {
   resolve: (res: PipelineResponse) => void;
@@ -67,7 +72,7 @@ export function usePipeline() {
   );
 
   const loadTrackFile = useCallback(
-    async (file: File): Promise<TrackData> => {
+    async (file: File): Promise<LoadedTrack> => {
       const text = await file.text();
       const name = file.name.replace(/\.[^.]+$/, "");
       const ext = file.name.split(".").pop()?.toLowerCase();
@@ -78,8 +83,11 @@ export function usePipeline() {
             ? "nmea"
             : "gpx";
       const res = await post({ kind, text, name });
-      if (res.ok && (res.kind === "gpx" || res.kind === "kml" || res.kind === "nmea")) {
-        return res.track;
+      if (res.ok && res.kind === "nmea") {
+        return { track: res.track, satellites: res.satellites };
+      }
+      if (res.ok && (res.kind === "gpx" || res.kind === "kml")) {
+        return { track: res.track, satellites: null };
       }
       throw new Error("Unerwartete Antwort fuer Track-Anfrage");
     },

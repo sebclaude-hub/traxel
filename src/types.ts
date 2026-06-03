@@ -80,3 +80,29 @@ export interface DemGrid {
   lon_max: number;
   elevations: (number | null)[];
 }
+
+// ---------------------------------------------------------------------------
+// Satelliten (NMEA GSV)
+// ---------------------------------------------------------------------------
+
+/** Ein Satellit: [prn, elevation_deg, azimuth_deg, snr] — null = fehlend. */
+export type SatRow = [
+  number | null,
+  number | null,
+  number | null,
+  number | null,
+];
+
+/** Ein GSV-Burst (Schnappschuss der sichtbaren Satelliten zu einem Zeitpunkt). */
+export interface GsvBurst {
+  ts_ms: number;
+  sats: SatRow[];
+}
+
+/** Satellitendaten, pro Konstellation (Talker) und an Trackpunkte geheftet. */
+export interface SatelliteData {
+  talkers: string[];
+  bursts_by_talker: Record<string, GsvBurst[]>;
+  /** Pro Talker: Trackindex → Burst-Index in bursts_by_talker (-1 = keiner). */
+  burst_idx_by_track: Record<string, number[]>;
+}
