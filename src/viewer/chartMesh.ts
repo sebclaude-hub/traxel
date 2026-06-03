@@ -127,7 +127,14 @@ function buildFromTerrainSubgrid(
   return { positions, texCoords, indices, anchor: [lon_center, lat_center] };
 }
 
-function computeAdaptiveSubdivision(chart: ChartOverlay): number {
+/**
+ * Subdivision des Karten-Gitters. Mit DEM wird die Aufloesung an die
+ * DEM-Vertex-Dichte gekoppelt: nur wenn das Karten-Gitter mindestens so fein
+ * ist wie das DEM, sitzt an jedem Terrain-Gipfel ein Karten-Vertex und die
+ * Karte folgt dem Gelaende, statt scharfe Features "abzuschneiden" (sonst
+ * stoesst genau dieses Feature durch). Ohne DEM: ~50 m/Vertex.
+ */
+function computeSubdivision(chart: ChartOverlay, demGrid: DemGrid | null): number {
   const lonSpan = Math.max(
     Math.abs(chart.corner_tr[0] - chart.corner_tl[0]),
     Math.abs(chart.corner_br[0] - chart.corner_bl[0]),
@@ -140,7 +147,15 @@ function computeAdaptiveSubdivision(chart: ChartOverlay): number {
     (chart.corner_tl[1] + chart.corner_tr[1] + chart.corner_bl[1] + chart.corner_br[1]) / 4;
   const { mpLon, mpLat } = metersPerDegree(latCenter);
   const maxM = Math.max(lonSpan * mpLon, latSpan * mpLat);
-  const raw = Math.ceil(maxM / TARGET_METERS_PER_VERTEX);
+
+  let stepM = TARGET_METERS_PER_VERTEX;
+  if (demGrid) {
+    const demStepLatM = ((demGrid.lat_max - demGrid.lat_min) / Math.max(demGrid.n_rows - 1, 1)) * mpLat;
+    const demStepLonM = ((demGrid.lon_max - demGrid.lon_min) / Math.max(demGrid.n_cols - 1, 1)) * mpLon;
+    const demStep = Math.min(demStepLatM, demStepLonM);
+    if (demStep > 0) stepM = demStep;
+  }
+  const raw = Math.ceil(maxM / stepM) + 1;
   return Math.max(SUBDIV_FLOOR, Math.min(SUBDIV_CAP, raw));
 }
 
@@ -163,7 +178,7 @@ function buildFromBilinearCorners(
   zScale: number,
   subdivision?: number | null,
 ): ChartMesh {
-  const requested = subdivision ?? chart.subdivision ?? computeAdaptiveSubdivision(chart);
+  const requested = subdivision ?? chart.subdivision ?? computeSubdivision(chart, demGrid);
   const N = Math.max(2, requested);
 
   const lon_center =
