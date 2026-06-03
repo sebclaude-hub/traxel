@@ -12,6 +12,7 @@ import type { DemGrid, SatelliteData, TrackBounds, TrackData } from "../types";
 import type {
   PipelineRequest,
   PipelineResponse,
+  TerrainOpts,
 } from "../workers/pipeline.worker";
 
 export interface LoadedTrack {
@@ -95,8 +96,8 @@ export function usePipeline() {
   );
 
   const loadTerrain = useCallback(
-    async (bounds: TrackBounds): Promise<DemGrid> => {
-      const res = await post({ kind: "terrain", bounds });
+    async (bounds: TrackBounds, opts?: TerrainOpts): Promise<DemGrid> => {
+      const res = await post({ kind: "terrain", bounds, opts });
       if (res.ok && res.kind === "terrain") return res.dem;
       throw new Error("Unerwartete Antwort fuer Terrain-Anfrage");
     },

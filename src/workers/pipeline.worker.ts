@@ -14,11 +14,17 @@ import { processGpx, processKml, processNmea } from "../pipeline";
 import { buildTerrain } from "../pipeline/terrain";
 import type { DemGrid, SatelliteData, TrackBounds, TrackData } from "../types";
 
+export interface TerrainOpts {
+  maxTiles?: number;
+  targetMetersPerPixel?: number;
+  maxPixelsPerAxis?: number;
+}
+
 export type PipelineRequest =
   | { id: number; kind: "gpx"; text: string; name: string }
   | { id: number; kind: "kml"; text: string; name: string }
   | { id: number; kind: "nmea"; text: string; name: string }
-  | { id: number; kind: "terrain"; bounds: TrackBounds };
+  | { id: number; kind: "terrain"; bounds: TrackBounds; opts?: TerrainOpts };
 
 export type PipelineResponse =
   | { id: number; ok: true; kind: "gpx"; track: TrackData }
@@ -47,7 +53,7 @@ self.onmessage = async (e: MessageEvent<PipelineRequest>) => {
         break;
       }
       case "terrain":
-        post({ id: req.id, ok: true, kind: "terrain", dem: await buildTerrain(req.bounds) });
+        post({ id: req.id, ok: true, kind: "terrain", dem: await buildTerrain(req.bounds, req.opts ?? {}) });
         break;
       default:
         throw new Error("Unbekannter Request-Typ");

@@ -18,6 +18,18 @@ const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 
 type TerrainState = "idle" | "loading" | "ok" | "error";
 
+// Terrain-Detailstufen: hoehere Stufen laden mehr/feinere Kacheln (langsamer,
+// mehr Speicher), dafuer schaerferes Gelaende.
+type TerrainDetail = "standard" | "hoch" | "max";
+const TERRAIN_DETAIL: Record<
+  TerrainDetail,
+  { maxTiles: number; targetMetersPerPixel: number; maxPixelsPerAxis: number }
+> = {
+  standard: { maxTiles: 24, targetMetersPerPixel: 30, maxPixelsPerAxis: 600 },
+  hoch: { maxTiles: 64, targetMetersPerPixel: 15, maxPixelsPerAxis: 1200 },
+  max: { maxTiles: 120, targetMetersPerPixel: 10, maxPixelsPerAxis: 2000 },
+};
+
 interface AppChart {
   id: string;
   name: string;
@@ -46,6 +58,7 @@ export default function App() {
   const [dem, setDem] = useState<DemGrid | null>(null);
   const [terrainState, setTerrainState] = useState<TerrainState>("idle");
   const [showTerrain, setShowTerrain] = useState(true);
+  const [terrainDetail, setTerrainDetail] = useState<TerrainDetail>("standard");
 
   // Aktiver Trackpunkt (steuert den SkyPlot). Bei Trackwechsel zurueck auf 0.
   const [activeIdx, setActiveIdx] = useState(0);
@@ -88,7 +101,7 @@ export default function App() {
     let cancelled = false;
     setDem(null);
     setTerrainState("loading");
-    loadTerrain(track.meta.bounds)
+    loadTerrain(track.meta.bounds, TERRAIN_DETAIL[terrainDetail])
       .then((grid) => {
         if (!cancelled) {
           setDem(grid);
@@ -101,7 +114,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [track, loadTerrain]);
+  }, [track, loadTerrain, terrainDetail]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -369,6 +382,17 @@ export default function App() {
                     [false, "aus"],
                   ]}
                   onChange={setShowTerrain}
+                />
+              )}
+              {(terrainState === "ok" || terrainState === "loading") && (
+                <Segmented<TerrainDetail>
+                  value={terrainDetail}
+                  options={[
+                    ["standard", "Std"],
+                    ["hoch", "Hoch"],
+                    ["max", "Max"],
+                  ]}
+                  onChange={setTerrainDetail}
                 />
               )}
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
