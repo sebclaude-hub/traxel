@@ -19,7 +19,7 @@ import { SolidPolygonLayer } from "@deck.gl/layers";
 
 import { sampleDem } from "../pipeline/terrain/sample";
 import type { ColorMode, DemGrid, TrackData } from "../types";
-import { plasmaColor, type Rgba } from "./colorMap";
+import { accelerationColor, plasmaColor, type Rgba } from "./colorMap";
 
 export interface CurtainSegment {
   /** 4-Punkt-3D-Footprint (eps-Streifen perpendikular, z = Boden-Hoehe). */
@@ -28,6 +28,9 @@ export interface CurtainSegment {
   height: number;
   /** Mittlerer Rang [0,1] des Segments (Farbgebung speed/altitude). */
   t: number;
+  /** Mittlere normalisierte Beschleunigung [−1,1] des Segments (Farbgebung
+   *  accel); NaN ohne Wert. */
+  accelN: number;
   /** Rohe mittlere Track-Hoehe MSL (m, ohne Z-Skalierung). */
   altMslRaw: number;
   /** Rohe mittlere Hoehe ueber Grund (m); null ohne Terrain. */
@@ -57,6 +60,30 @@ function flightColor(altMsl: number | null, altAgl: number | null): Rgba {
   return COL_BLUE;
 }
 
+export interface LegendItem {
+  color: Rgba;
+  label: string;
+}
+
+/** Klassen-Legende des Flug-Modus (Reihenfolge = niedrig → hoch). Nutzt
+ *  dieselben Farben/Schwellen wie flightColor → keine Duplizierung. */
+export function flightLegendItems(): LegendItem[] {
+  return [
+    { color: COL_RED, label: "AGL < 500 ft" },
+    { color: COL_ORANGE, label: "AGL < 1000 ft" },
+    { color: COL_TURQUOISE, label: "MSL < 5000 ft" },
+    { color: COL_BLUE, label: "darüber" },
+  ];
+}
+
+/** Klassen-Legende des Drohnen-Modus (Grenze 100 m AGL). */
+export function droneLegendItems(): LegendItem[] {
+  return [
+    { color: COL_BLUE, label: "AGL ≤ 100 m" },
+    { color: COL_RED, label: "AGL > 100 m" },
+  ];
+}
+
 function droneColor(altAgl: number | null): Rgba {
   if (altAgl === null) return COL_GREY;
   return altAgl <= DRONE_AGL_LIMIT ? COL_BLUE : COL_RED;
@@ -64,12 +91,24 @@ function droneColor(altAgl: number | null): Rgba {
 
 const EPS = 1e-6; // grad ≈ 11 cm — gibt earcut eine triangulierbare XY-Flaeche
 
+/** Mittelt zwei Werte null-sicher; beide fehlen → NaN. */
+function meanOrNaN(a: number | null, b: number | null): number {
+  const av = a === null || Number.isNaN(a) ? null : a;
+  const bv = b === null || Number.isNaN(b) ? null : b;
+  if (av === null && bv === null) return NaN;
+  if (av === null) return bv as number;
+  if (bv === null) return av;
+  return (av + bv) / 2;
+}
+
 export function buildCurtainSegments(
   track: TrackData,
   dem: DemGrid | null,
   rankPositions: number[],
   altBase: number,
   zScale: number,
+  accelNorm: (number | null)[] | null = null,
+  zOffset = 0,
 ): CurtainSegment[] {
   const { lat, lon, alt } = track.points;
   const n = lat.length;
@@ -99,7 +138,9 @@ export function buildCurtainSegments(
     const px = (-dy / len) * EPS;
     const py = (dx / len) * EPS;
 
-    const top = (exag(altA) + exag(altB)) / 2;
+    // z-Versatz nur auf die Track-Oberkante (echte Meter, vor der Ueberhoehung);
+    // die Terrain-/0-Unterkante bleibt unveraendert → Vorhang folgt korrekt.
+    const top = (exag(altA + zOffset) + exag(altB + zOffset)) / 2;
 
     // Boden + rohe Terrain-Hoehe (fuer AGL). dem ? Terrain : 0 m MSL.
     let bot = 0;
@@ -118,6 +159,10 @@ export function buildCurtainSegments(
     const altMslRaw = (altA + altB) / 2;
     const altAglRaw = terrMeanRaw !== null ? altMslRaw - terrMeanRaw : null;
 
+    const accelN = accelNorm
+      ? meanOrNaN(accelNorm[i], accelNorm[i + 1])
+      : NaN;
+
     segments.push({
       footprint: [
         [lonA + px, latA + py, base],
@@ -127,6 +172,7 @@ export function buildCurtainSegments(
       ],
       height,
       t,
+      accelN,
       altMslRaw,
       altAglRaw,
     });
@@ -138,6 +184,8 @@ export function makeCurtainLayer(segments: CurtainSegment[], colorMode: ColorMod
   const getColor = (d: CurtainSegment): Rgba => {
     if (colorMode === "flight") return flightColor(d.altMslRaw, d.altAglRaw);
     if (colorMode === "drone") return droneColor(d.altAglRaw);
+    if (colorMode === "accel")
+      return Number.isNaN(d.accelN) ? FALLBACK : accelerationColor(d.accelN, 200);
     return Number.isNaN(d.t) ? FALLBACK : plasmaColor(d.t, 200);
   };
 

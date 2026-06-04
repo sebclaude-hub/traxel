@@ -24,6 +24,7 @@ import {
 } from "../library/track-store";
 import type { ChartRecord } from "../library/db";
 import { LibraryPanel } from "./LibraryPanel";
+import { ColorLegend } from "./ColorLegend";
 import { SkyPlot } from "../viewer/SkyPlot";
 import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
@@ -89,6 +90,9 @@ export default function App() {
 
   const [colorMode, setColorMode] = useState<ColorMode>("speed");
   const [showCurtain, setShowCurtain] = useState(true);
+  // Konstanter Hoehen-Versatz (m) zum Absenken/Anheben des Tracks relativ zum
+  // Terrain (z.B. Ellipsoid-vs-Geoid). Reine Darstellung; bleibt ueber Importe.
+  const [zOffset, setZOffset] = useState(0);
   const [zScale, setZScale] = useState(3);
 
   const [dem, setDem] = useState<DemGrid | null>(null);
@@ -444,16 +448,19 @@ export default function App() {
     !activeDem && (colorMode === "flight" || colorMode === "drone")
       ? "speed"
       : colorMode;
+  // "Beschl." (3D-Tangentialbeschleunigung) braucht kein Terrain → in beiden Listen.
   const colorOptions: [ColorMode, string][] = activeDem
     ? [
         ["speed", "Tempo"],
         ["altitude", "Höhe"],
         ["flight", "Flug"],
         ["drone", "Drohne"],
+        ["accel", "Beschl."],
       ]
     : [
         ["speed", "Geschwindigkeit"],
         ["altitude", "Höhe"],
+        ["accel", "Beschl."],
       ];
 
   return (
@@ -526,6 +533,7 @@ export default function App() {
               colorMode={effColorMode}
               showCurtain={showCurtain}
               zScale={zScale}
+              zOffset={zOffset}
               charts={placedCharts}
               editChart={editChart}
             />
@@ -535,6 +543,7 @@ export default function App() {
                 options={colorOptions}
                 onChange={setColorMode}
               />
+              <ColorLegend mode={effColorMode} track={viewTrack} />
               <Segmented<boolean>
                 value={showCurtain}
                 options={[
@@ -575,6 +584,12 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <LabeledNum
+                label="Höhe ±m"
+                value={zOffset}
+                step={5}
+                onChange={setZOffset}
+              />
 
               {/* Cut-Werkzeug: Bereich (Original-Indizes) + Modus → Schneiden. */}
               {track && (

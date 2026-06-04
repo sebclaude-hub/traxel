@@ -22,7 +22,13 @@ import {
   placementToCorners,
   type ChartPlacement,
 } from "./chartPlacement";
-import { computeRankPositions, plasmaColor, type Rgba } from "./colorMap";
+import {
+  accelerationColor,
+  computeRankPositions,
+  plasmaColor,
+  type Rgba,
+} from "./colorMap";
+import { computeAcceleration3D, robustSymmetricScale } from "./kinematics";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
 export interface PlacedChart {
@@ -42,6 +48,8 @@ interface Props {
   colorMode: ColorMode;
   showCurtain: boolean;
   zScale: number;
+  /** Konstanter Hoehen-Versatz des Tracks in echten Metern (Darstellung). */
+  zOffset?: number;
   charts?: PlacedChart[];
   editChart?: EditChart | null;
 }
@@ -76,7 +84,7 @@ function minAlt(alts: (number | null)[]): number {
   return Number.isFinite(min) ? min : 0;
 }
 
-export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts = [], editChart = null }: Props) {
+export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffset = 0, charts = [], editChart = null }: Props) {
   const [viewState, setViewState] = useState<DeckViewState>(() =>
     buildInitialViewState(track),
   );
@@ -93,9 +101,10 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
   } | null>(null);
 
   const altBase = useMemo(() => minAlt(track.points.alt), [track]);
+  // z-Versatz (echte Meter) vor der Ueberhoehung → skaliert konsistent mit dem Terrain.
   const exagAlt = useCallback(
-    (alt: number | null) => altBase + ((alt ?? altBase) - altBase) * zScale,
-    [altBase, zScale],
+    (alt: number | null) => altBase + ((alt ?? altBase) + zOffset - altBase) * zScale,
+    [altBase, zScale, zOffset],
   );
 
   // Die Track-Linie bleibt bei flight/drone auf Speed-Plasma; die Klassen-
@@ -110,33 +119,52 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
     return computeRankPositions(values);
   }, [track, trackColorMode]);
 
+  // 3D-Beschleunigung pro Punkt (m/s²) + robuste, symmetrische Skala. Daraus
+  // accelNorm ∈ [−1,1] fuer die viridis/magma-Farbgebung. Reine Track-Ableitung,
+  // daher auf [track] memoisiert (wie rankPositions).
+  const { accel, accelNorm } = useMemo(() => {
+    const a = computeAcceleration3D(track.points);
+    const scale = robustSymmetricScale(a);
+    const norm = a.map((v) =>
+      v === null ? null : Math.max(-1, Math.min(1, v / scale)),
+    );
+    return { accel: a, accelNorm: norm };
+  }, [track]);
+
   const curtainSegments = useMemo(
-    () => buildCurtainSegments(track, dem, rankPositions, altBase, zScale),
-    [track, dem, rankPositions, altBase, zScale],
+    () => buildCurtainSegments(track, dem, rankPositions, altBase, zScale, accelNorm, zOffset),
+    [track, dem, rankPositions, altBase, zScale, accelNorm, zOffset],
   );
 
-  // Track als individuelle, eingefaerbte Segmente.
+  // Track als individuelle, eingefaerbte Segmente. Pro Segment: Rang t (speed/
+  // altitude) und normalisierte Beschleunigung accelN (accel), je gemittelt.
   const pathSegments = useMemo(() => {
     const { lon, lat, alt } = track.points;
-    const segs: { path: [number, number, number][]; t: number }[] = [];
+    const mean2 = (a: number | null, b: number | null): number => {
+      const av = a === null || Number.isNaN(a) ? null : a;
+      const bv = b === null || Number.isNaN(b) ? null : b;
+      if (av === null && bv === null) return NaN;
+      if (av === null) return bv as number;
+      if (bv === null) return av;
+      return (av + bv) / 2;
+    };
+    const segs: {
+      path: [number, number, number][];
+      t: number;
+      accelN: number;
+    }[] = [];
     for (let i = 0; i < lon.length - 1; i++) {
-      const tI = rankPositions[i];
-      const tI1 = rankPositions[i + 1];
-      let t: number;
-      if (Number.isNaN(tI) && Number.isNaN(tI1)) t = NaN;
-      else if (Number.isNaN(tI)) t = tI1;
-      else if (Number.isNaN(tI1)) t = tI;
-      else t = (tI + tI1) / 2;
       segs.push({
         path: [
           [lon[i], lat[i], exagAlt(alt[i])],
           [lon[i + 1], lat[i + 1], exagAlt(alt[i + 1])],
         ],
-        t,
+        t: mean2(rankPositions[i], rankPositions[i + 1]),
+        accelN: mean2(accelNorm[i], accelNorm[i + 1]),
       });
     }
     return segs;
-  }, [track, rankPositions, exagAlt]);
+  }, [track, rankPositions, accelNorm, exagAlt]);
 
   const layers = useMemo(() => {
     const result = [];
@@ -152,11 +180,18 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
     if (showCurtain) result.push(makeCurtainLayer(curtainSegments, colorMode));
 
     result.push(
-      new PathLayer<{ path: [number, number, number][]; t: number }>({
+      new PathLayer<{ path: [number, number, number][]; t: number; accelN: number }>({
         id: "track-path",
         data: pathSegments,
         getPath: (d) => d.path,
-        getColor: (d) => (Number.isNaN(d.t) ? FALLBACK : plasmaColor(d.t, 255)),
+        getColor: (d) =>
+          colorMode === "accel"
+            ? Number.isNaN(d.accelN)
+              ? FALLBACK
+              : accelerationColor(d.accelN, 255)
+            : Number.isNaN(d.t)
+              ? FALLBACK
+              : plasmaColor(d.t, 255),
         getWidth: 2,
         widthUnits: "pixels",
         pickable: false,
@@ -179,7 +214,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
         radiusUnits: "pixels",
         getFillColor: [0, 0, 0, 0],
         pickable: true,
-        updateTriggers: { getPosition: [zScale, altBase] },
+        updateTriggers: { getPosition: [zScale, altBase, zOffset] },
       }),
     );
 
@@ -237,12 +272,17 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
       const speed = track.points.speed_kmh[idx] ?? null;
       const alt = track.points.alt[idx] ?? null;
       const above = track.points.above_terrain[idx] ?? null;
+      const a = accel[idx] ?? null;
 
       const lines: string[] = [];
       if (ts) lines.push(formatTimestamp(ts));
       lines.push(formatSpeed(speed));
       lines.push(`MSL ${formatAltitude(alt)}`);
       if (above !== null) lines.push(`üG ${Math.round(above)} m`);
+      if (a !== null && Number.isFinite(a)) {
+        // 3D-Tangentialbeschleunigung; Vorzeichen: + schneller, − langsamer.
+        lines.push(`Beschl. ${a >= 0 ? "+" : "−"}${Math.abs(a).toFixed(1)} m/s²`);
+      }
 
       return {
         html: lines.map((l) => `<div>${l}</div>`).join(""),
@@ -257,7 +297,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, charts
         },
       };
     },
-    [track],
+    [track, accel],
   );
 
   // Cursor auf die Karten-Hoehe zurueckprojizieren (statt z=0) — sonst springt

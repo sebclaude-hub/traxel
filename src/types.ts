@@ -41,7 +41,7 @@ export interface QuantileBreaks {
   n_quantiles: number;
 }
 
-export type ColorMode = "speed" | "altitude" | "flight" | "drone";
+export type ColorMode = "speed" | "altitude" | "flight" | "drone" | "accel";
 
 export interface TrackPoints {
   lat: number[];

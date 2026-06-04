@@ -9,7 +9,11 @@
 // Das ergibt einen gleichmaessigen Verlauf und ist robust gegen Ausreisser.
 // ---------------------------------------------------------------------------
 
-import { interpolatePlasma } from "d3-scale-chromatic";
+import {
+  interpolatePlasma,
+  interpolateYlGnBu,
+  interpolateYlOrRd,
+} from "d3-scale-chromatic";
 
 export type Rgba = [number, number, number, number];
 
@@ -78,6 +82,34 @@ export function computeRankPositions(values: (number | null)[]): number[] {
     i = j;
   }
   return result;
+}
+
+/**
+ * Farbe fuer vorzeichenbehaftete, normalisierte Beschleunigung aNorm ∈ [−1, 1]:
+ *   aNorm ≥ 0 (beschleunigen) → YlGnBu nach Betrag (Gelb → Blau),
+ *   aNorm <  0 (bremsen)      → YlOrRd nach Betrag (Gelb → Rot).
+ * Beide Skalen starten bei 0 in blassem Gelb → ruhiges Fahren bleibt neutral
+ * gelb, Bremsen schiebt nach Rot, Beschleunigen nach Blau (gut gegen das
+ * gelbe "Cruising" ablesbar). NaN/Nicht-endlich → Grau.
+ */
+export function accelerationColor(aNorm: number, alpha = 255): Rgba {
+  if (!Number.isFinite(aNorm)) return [150, 150, 150, alpha];
+  const mag = Math.min(1, Math.abs(aNorm));
+  const css = aNorm >= 0 ? interpolateYlGnBu(mag) : interpolateYlOrRd(mag);
+  const [r, g, b] = parseRgb(css);
+  return [r, g, b, alpha];
+}
+
+/** CSS linear-gradient fuer die Beschleunigungs-Legende: magma (links, Bremsen)
+ *  ↔ neutral (Mitte) ↔ viridis (rechts, Beschleunigen). */
+export function accelGradientCss(steps = 24, alpha = 255): string {
+  const stops: string[] = [];
+  for (let i = 0; i < steps; i++) {
+    const x = i / (steps - 1); // 0..1
+    const aNorm = x * 2 - 1; // −1..+1
+    stops.push(`${rgbaCss(accelerationColor(aNorm, alpha))} ${(x * 100).toFixed(1)}%`);
+  }
+  return `linear-gradient(to right, ${stops.join(", ")})`;
 }
 
 /** rgba-CSS-String aus einem Rgba-Tupel. */
