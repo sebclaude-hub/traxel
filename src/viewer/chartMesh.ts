@@ -28,17 +28,17 @@
 //
 // Positionen sind Meter-Offsets vom Bounds-Zentrum (Anker), wie demMesh/curtain.
 //
-// OFFENER BUG (TODO, gemeldet beim Drehen): Der Subgrid deckt die ACHSEN-
-// PARALLELE Bounding-Box der (gedrehten) Karte ab. Vertices ausserhalb des
-// gedrehten Rechtecks bekommen UV ausserhalb [0,1] und werden via 1px-
-// Transparenzrand + clamp-to-edge farblich transparent — ABER diese Dreiecke
-// schreiben weiterhin in den Tiefenpuffer und verdecken dadurch, was dahinter
-// liegt → sichtbar als schwacher "Schatten" in Form der Bounding-Box um die
-// gedrehte Karte. Loesungsideen fuer morgen:
-//   (a) voll transparente Fragmente verwerfen / Depth-Write fuer den Chart-
-//       Layer abschalten (chartLayer parameters), ODER
-//   (b) das Mesh auf das gedrehte Rechteck CLIPPEN (nur Zellen mit Vertex im
-//       Quad emittieren / Randzellen beschneiden) — dann kein Overhang.
+// BOUNDING-BOX-SCHATTEN (geloest via Cell-Culling, Loesung b): Der Subgrid deckt
+// die ACHSENPARALLELE Bounding-Box der (gedrehten) Karte ab. Frueher schrieben
+// die Zwickel-Dreiecke ausserhalb des gedrehten Rechtecks — trotz transparenter
+// Textur — weiter in den Tiefenpuffer und verdeckten dahinterliegende Geometrie
+// (schwacher "Schatten" in Bounding-Box-Form). Fix: beim Index-Aufbau werden nur
+// Zellen emittiert, deren UV-Bounding-Box das Einheitsquadrat [0,1]² ueberlappt;
+// komplett ausserhalb liegende Zellen werden verworfen. Ganze DEM-Zellen bleiben
+// erhalten → Triangulation weiterhin identisch zum Terrain (kein Durchstoßen).
+// (Die Alternative (a) — Depth-Write fuer den Chart-Layer abschalten — waere
+// order-abhaengig sobald mehrere transparente Boden-Overlays uebereinanderliegen,
+// daher hier bewusst die geometrische Loesung.)
 // ---------------------------------------------------------------------------
 
 import { sampleDem } from "../pipeline/terrain/sample";
@@ -85,8 +85,10 @@ function buildFromTerrainSubgrid(
 ): ChartMesh | null {
   // Achsenparallele Bounding-Box ueber ALLE vier Ecken (auch fuer gedrehte
   // Karten korrekt). Der Subgrid deckt die Box ab; ausserhalb des gedrehten
-  // Rechtecks liegende Vertices bekommen UV ausserhalb [0,1] und werden dank
-  // Transparenzrand des Bildes (clamp-to-edge) transparent gerendert.
+  // Rechtecks liegende Vertices bekommen UV ausserhalb [0,1]. Die rein
+  // ausserhalb liegenden Zellen werden beim Index-Aufbau per Cell-Culling
+  // verworfen (s. Kopfkommentar), die Randzellen bleiben dank Transparenzrand
+  // des Bildes (clamp-to-edge) am Saum transparent.
   const lons = [chart.corner_tl[0], chart.corner_tr[0], chart.corner_bl[0], chart.corner_br[0]];
   const lats = [chart.corner_tl[1], chart.corner_tr[1], chart.corner_bl[1], chart.corner_br[1]];
   const lon_min = Math.min(...lons);
@@ -156,8 +158,20 @@ function buildFromTerrainSubgrid(
     }
   }
 
+  // Cell-Culling gegen das gedrehte Rechteck (= UV-Einheitsquadrat [0,1]²):
+  // Nur Zellen emittieren, deren UV-Bounding-Box [0,1]² ueberlappt. Zellen, die
+  // KOMPLETT ausserhalb liegen (die grossen Zwickel-Dreiecke der achsenparallelen
+  // Bounding-Box bei gedrehten Karten), werden verworfen → kein transparenter
+  // Overhang schreibt mehr Tiefe, der Bounding-Box-"Schatten" verschwindet.
+  // Es bleiben GANZE DEM-Zellen erhalten (kein Beschneiden einzelner Dreiecke),
+  // also identische Vertices + Triangulation wie das Terrain → Durchstoßen bleibt
+  // konstruktionsbedingt unmoeglich. Hoechstens eine Randzelle ragt minimal ueber
+  // die Karte hinaus, deren Aussenteil aber ohnehin im Transparenzrand der Textur
+  // (clamp-to-edge) liegt. Die nicht referenzierten Vertices bleiben im Buffer
+  // (harmlos), nur der Index-Buffer wird gefiltert.
   const nCells = (N_rows - 1) * (N_cols - 1);
   const indices = new Uint32Array(nCells * 6);
+  const UV_EPS = 1e-4;
   let iIdx = 0;
   for (let r = 0; r < N_rows - 1; r++) {
     for (let c = 0; c < N_cols - 1; c++) {
@@ -165,6 +179,15 @@ function buildFromTerrainSubgrid(
       const tr = tl + 1;
       const bl = tl + N_cols;
       const br = bl + 1;
+
+      const uMin = Math.min(texCoords[tl * 2], texCoords[tr * 2], texCoords[bl * 2], texCoords[br * 2]);
+      const uMax = Math.max(texCoords[tl * 2], texCoords[tr * 2], texCoords[bl * 2], texCoords[br * 2]);
+      const vMin = Math.min(texCoords[tl * 2 + 1], texCoords[tr * 2 + 1], texCoords[bl * 2 + 1], texCoords[br * 2 + 1]);
+      const vMax = Math.max(texCoords[tl * 2 + 1], texCoords[tr * 2 + 1], texCoords[bl * 2 + 1], texCoords[br * 2 + 1]);
+      if (uMax < -UV_EPS || uMin > 1 + UV_EPS || vMax < -UV_EPS || vMin > 1 + UV_EPS) {
+        continue; // Zelle liegt komplett ausserhalb der Karte
+      }
+
       indices[iIdx++] = tl;
       indices[iIdx++] = bl;
       indices[iIdx++] = tr;
@@ -173,7 +196,7 @@ function buildFromTerrainSubgrid(
       indices[iIdx++] = br;
     }
   }
-  return { positions, texCoords, indices, anchor: [lon_center, lat_center] };
+  return { positions, texCoords, indices: indices.slice(0, iIdx), anchor: [lon_center, lat_center] };
 }
 
 /**

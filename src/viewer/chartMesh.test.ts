@@ -84,6 +84,50 @@ describe("buildChartMesh", () => {
     expect(maxUV > 1 || minUV < 0).toBe(true);
   });
 
+  it("cullt bei gedrehter Karte die Zwickel-Zellen ausserhalb des Rechtecks", () => {
+    const fine: DemGrid = {
+      n_rows: 21,
+      n_cols: 21,
+      lat_min: 0,
+      lat_max: 1,
+      lon_min: 0,
+      lon_max: 1,
+      elevations: new Array(441).fill(100),
+    };
+    // 45°-Raute zentriert bei (0.5, 0.5): die achsenparallele Bounding-Box ist
+    // doppelt so gross wie die Raute → die vier Eck-Zwickel muessen weg.
+    const rotated: ChartOverlay = {
+      name: "r",
+      corner_tl: [0.5, 0.7],
+      corner_tr: [0.7, 0.5],
+      corner_bl: [0.3, 0.5],
+      corner_br: [0.5, 0.3],
+      elevation_m: 0,
+    };
+    const mesh = buildChartMesh(rotated, fine, 0, 1);
+
+    expect(mesh.indices.length).toBeGreaterThan(0);
+    expect(mesh.indices.length % 6).toBe(0); // ganze Zellen, kein Teil-Dreieck
+
+    // Die weit aussen liegenden Zwickel-Vertices (UV bis ~±0.5 bei dieser Raute)
+    // duerfen NICHT mehr referenziert werden. Eine Randzelle ragt UV-seitig um
+    // hoechstens ~eine Zellbreite (~0.25) hinaus — alles darueber waere ein nicht
+    // gecullter Zwickel. Schranke 0.3 trennt beides sauber.
+    for (let i = 0; i < mesh.indices.length; i++) {
+      const idx = mesh.indices[i];
+      const u = mesh.texCoords[idx * 2];
+      const v = mesh.texCoords[idx * 2 + 1];
+      expect(u).toBeGreaterThan(-0.3);
+      expect(u).toBeLessThan(1.3);
+      expect(v).toBeGreaterThan(-0.3);
+      expect(v).toBeLessThan(1.3);
+    }
+
+    // Sanity: deutlich weniger als das volle 20x20-Zellgitter (×6 Indizes),
+    // weil die ~halbe Bounding-Box (Zwickel) weggecullt ist.
+    expect(mesh.indices.length).toBeLessThan(20 * 20 * 6);
+  });
+
   it("texCoords decken im bilinearen Pfad den Bereich [0,1] ab", () => {
     // Ohne DEM → Strategie B (Ecken), u/v laufen exakt 0..1.
     const mesh = buildChartMesh(axisAlignedChart(), null, 0, 1);
