@@ -17,7 +17,13 @@ import {
   loadChartsForBounds,
   saveChart,
 } from "../library/chart-store";
+import {
+  hashTrackText,
+  readTrackText,
+  saveTrack,
+} from "../library/track-store";
 import type { ChartRecord } from "../library/db";
+import { LibraryPanel } from "./LibraryPanel";
 import { SkyPlot } from "../viewer/SkyPlot";
 import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
@@ -73,12 +79,13 @@ async function decodePaddedImage(src: Blob): Promise<ImageBitmap> {
 }
 
 export default function App() {
-  const { loadTrackFile, loadTerrain } = usePipeline();
+  const { loadTrackText, loadTerrain } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
   const [satellites, setSatellites] = useState<SatelliteData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const [colorMode, setColorMode] = useState<ColorMode>("speed");
   const [showCurtain, setShowCurtain] = useState(true);
@@ -145,22 +152,46 @@ export default function App() {
     };
   }, [track, loadTerrain, terrainDetail]);
 
+  // Gemeinsamer Post-Load-Code: State setzen, Cuts/Charts zuruecksetzen. Wird
+  // vom Datei-Import UND vom Wiederoeffnen aus der Bibliothek genutzt.
+  const applyLoadedTrack = useCallback((td: TrackData, sat: SatelliteData | null) => {
+    setTrack(td);
+    setSatellites(sat);
+    setCuts([]); // Cuts beim Laden einer neuen Datei zuruecksetzen
+    setCharts([]);
+    setEditChartId(null);
+  }, []);
+
   const handleFile = useCallback(
     async (file: File) => {
       setLoading(true);
       setError(null);
       try {
-        const { track: td, satellites: sat } = await loadTrackFile(file);
+        const text = await file.text();
+        const { track: td, satellites: sat } = await loadTrackText(text, file.name);
         if (td.meta.n_points === 0) {
           setError("Keine gueltigen Trackpunkte in der Datei.");
           setTrack(null);
           setSatellites(null);
         } else {
-          setTrack(td);
-          setSatellites(sat);
-          setCuts([]); // Cuts beim Laden einer neuen Datei zuruecksetzen
-          setCharts([]);
-          setEditChartId(null);
+          applyLoadedTrack(td, sat);
+          // Track automatisch in der Bibliothek merken (Recents, Dedupe per Hash).
+          const hash = await hashTrackText(text);
+          void saveTrack(
+            {
+              hash,
+              name: td.meta.name,
+              format: td.meta.source_type,
+              bbox: td.meta.bounds,
+              timestampStartUtc: td.meta.timestamp_start_utc,
+              timestampEndUtc: td.meta.timestamp_end_utc,
+              nPoints: td.meta.n_points,
+              totalDistanceM: td.meta.total_distance_m,
+              durationS: td.meta.duration_s,
+              savedAt: Date.now(),
+            },
+            text,
+          );
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -170,7 +201,30 @@ export default function App() {
         setLoading(false);
       }
     },
-    [loadTrackFile],
+    [loadTrackText, applyLoadedTrack],
+  );
+
+  // Track aus der Bibliothek wiederoeffnen: gespeicherten Text durch dieselbe
+  // Pipeline schicken. Dateiname aus name+format rekonstruiert (steuert Routing).
+  const openTrackFromLibrary = useCallback(
+    async (hash: string, name: string, format: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const text = await readTrackText(hash);
+        if (text === null) {
+          setError("Track nicht mehr in der Bibliothek gefunden.");
+          return;
+        }
+        const { track: td, satellites: sat } = await loadTrackText(text, `${name}.${format}`);
+        applyLoadedTrack(td, sat);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loadTrackText, applyLoadedTrack],
   );
 
   // PNG-Karte importieren. Ist das Bild (per Hash) schon in der Bibliothek,
@@ -435,6 +489,9 @@ export default function App() {
           <button style={btnStyle} onClick={() => fileInputRef.current?.click()}>
             Andere Datei…
           </button>
+          <button style={btnStyle} onClick={() => setLibraryOpen(true)} title="Bibliothek">
+            📚 Bibliothek
+          </button>
         </div>
       )}
 
@@ -609,6 +666,7 @@ export default function App() {
             loading={loading}
             error={error}
             onPick={() => fileInputRef.current?.click()}
+            onLibrary={() => setLibraryOpen(true)}
           />
         )}
         </div>
@@ -642,6 +700,19 @@ export default function App() {
           </span>
         </div>
       )}
+
+      {libraryOpen && (
+        <LibraryPanel
+          onClose={() => setLibraryOpen(false)}
+          onOpenTrack={(hash, name, format) => {
+            setLibraryOpen(false);
+            void openTrackFromLibrary(hash, name, format);
+          }}
+          onChartDeleted={(hash) =>
+            setCharts((cs) => cs.filter((c) => c.hash !== hash))
+          }
+        />
+      )}
     </div>
   );
 }
@@ -651,11 +722,13 @@ function DropPrompt({
   loading,
   error,
   onPick,
+  onLibrary,
 }: {
   dragOver: boolean;
   loading: boolean;
   error: string | null;
   onPick: () => void;
+  onLibrary: () => void;
 }) {
   return (
     <div style={{ ...centerStyle, ...(dragOver ? dropActiveStyle : null) }}>
@@ -664,9 +737,14 @@ function DropPrompt({
         <div style={{ color: "#aaa", fontSize: 14, marginBottom: 20 }}>
           GPX-, KML- oder NMEA-Datei hierher ziehen
         </div>
-        <button style={btnPrimaryStyle} onClick={onPick}>
-          Datei auswählen
-        </button>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button style={btnPrimaryStyle} onClick={onPick}>
+            Datei auswählen
+          </button>
+          <button style={btnStyle} onClick={onLibrary}>
+            📚 Bibliothek
+          </button>
+        </div>
         {loading && (
           <div style={{ color: "#888", fontSize: 13, marginTop: 16 }}>
             Track wird verarbeitet…

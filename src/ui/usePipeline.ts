@@ -72,11 +72,12 @@ export function usePipeline() {
     [],
   );
 
-  const loadTrackFile = useCallback(
-    async (file: File): Promise<LoadedTrack> => {
-      const text = await file.text();
-      const name = file.name.replace(/\.[^.]+$/, "");
-      const ext = file.name.split(".").pop()?.toLowerCase();
+  // Track aus Roh-Text + Name (Endung) parsen. Genutzt vom Datei-Import und vom
+  // Wiederoeffnen aus der Bibliothek (dort liegt nur der gespeicherte Text vor).
+  const loadTrackText = useCallback(
+    async (text: string, fileName: string): Promise<LoadedTrack> => {
+      const name = fileName.replace(/\.[^.]+$/, "");
+      const ext = fileName.split(".").pop()?.toLowerCase();
       const kind =
         ext === "kml"
           ? "kml"
@@ -95,6 +96,12 @@ export function usePipeline() {
     [post],
   );
 
+  const loadTrackFile = useCallback(
+    async (file: File): Promise<LoadedTrack> =>
+      loadTrackText(await file.text(), file.name),
+    [loadTrackText],
+  );
+
   const loadTerrain = useCallback(
     async (bounds: TrackBounds, opts?: TerrainOpts): Promise<DemGrid> => {
       const res = await post({ kind: "terrain", bounds, opts });
@@ -104,5 +111,5 @@ export function usePipeline() {
     [post],
   );
 
-  return { loadTrackFile, loadTerrain };
+  return { loadTrackFile, loadTrackText, loadTerrain };
 }

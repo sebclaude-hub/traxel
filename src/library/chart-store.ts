@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { bboxIntersects } from "./spatial";
+import { sha256Hex } from "./hash";
 import { deleteChart, getAllCharts, putChart, type ChartRecord } from "./db";
 import type { TrackBounds } from "../types";
 
@@ -15,10 +16,7 @@ const CHART_DIR = "traxel-charts";
 
 /** SHA-256 der Bytes als Hex-String. Identitaet einer Karte. */
 export async function hashImageBytes(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256Hex(bytes);
 }
 
 function chartFileName(hash: string): string {
