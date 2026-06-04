@@ -10,6 +10,14 @@ import { applyCuts, type CutMode, type CutSpec } from "../pipeline";
 import { enrichTrackWithTerrain } from "../pipeline/terrain";
 import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
+import { cornersToBounds } from "../library/spatial";
+import {
+  getChartRecord,
+  hashImageBytes,
+  loadChartsForBounds,
+  saveChart,
+} from "../library/chart-store";
+import type { ChartRecord } from "../library/db";
 import { SkyPlot } from "../viewer/SkyPlot";
 import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
@@ -32,16 +40,37 @@ const TERRAIN_DETAIL: Record<
 
 interface AppChart {
   id: string;
+  /** SHA-256 der PNG-Bytes — Identitaet/Dedupe + Bibliotheks-Schluessel. */
+  hash: string;
   name: string;
   image: ImageBitmap;
+  /** Rohe PNG-Bytes, vorgehalten zum Verankern in der Bibliothek. */
+  bytes: ArrayBuffer;
   placement: ChartPlacement;
   elevationM: number;
   visible: boolean;
+  /** true, wenn aktuell in der Bibliothek gespeichert (verankert). */
+  anchored: boolean;
 }
 
 const DEG2RAD = Math.PI / 180;
 const isImageFile = (f: File) =>
   f.type.startsWith("image/") || /\.png$/i.test(f.name);
+
+// PNG dekodieren mit 1px transparentem Rand: bei gedrehten Karten liegen
+// Mesh-Vertices auch ausserhalb des Rechtecks; mit clamp-to-edge sampeln sie
+// diesen Rand → transparent statt verschmiert. Der ~0,4%-Versatz ist unsichtbar.
+async function decodePaddedImage(src: Blob): Promise<ImageBitmap> {
+  const original = await createImageBitmap(src);
+  const pad = 1;
+  const cv = document.createElement("canvas");
+  cv.width = original.width + pad * 2;
+  cv.height = original.height + pad * 2;
+  cv.getContext("2d")!.drawImage(original, pad, pad);
+  const image = await createImageBitmap(cv);
+  original.close();
+  return image;
+}
 
 export default function App() {
   const { loadTrackFile, loadTerrain } = usePipeline();
@@ -144,44 +173,120 @@ export default function App() {
     [loadTrackFile],
   );
 
-  // PNG-Karte importieren: anfangs zentriert auf die Track-Bounds platziert.
+  // PNG-Karte importieren. Ist das Bild (per Hash) schon in der Bibliothek,
+  // wird die gespeicherte Platzierung uebernommen; sonst zentriert auf die
+  // Track-Bounds platziert. Gleiche Karte nicht doppelt hinzufuegen.
   const addChartFromFile = useCallback(
     async (file: File) => {
       if (!track) {
         setError("Erst einen Track laden, dann eine Karte hinzufügen.");
         return;
       }
-      // 1px transparenter Rand: bei gedrehten Karten liegen Mesh-Vertices auch
-      // ausserhalb des Rechtecks; mit clamp-to-edge sampeln sie diesen Rand →
-      // transparent statt verschmiert. Der ~0,4%-Inhaltsversatz ist unsichtbar.
-      const src = await createImageBitmap(file);
-      const pad = 1;
-      const cv = document.createElement("canvas");
-      cv.width = src.width + pad * 2;
-      cv.height = src.height + pad * 2;
-      cv.getContext("2d")!.drawImage(src, pad, pad);
-      const image = await createImageBitmap(cv);
-      src.close();
-      const b = track.meta.bounds;
-      const centerLon = (b.lon_min + b.lon_max) / 2;
-      const centerLat = (b.lat_min + b.lat_max) / 2;
-      const mpLon = 111320 * Math.cos(centerLat * DEG2RAD);
-      const bboxW = (b.lon_max - b.lon_min) * mpLon;
-      const widthM = Math.max(300, bboxW * 0.3 || 1000);
-      const heightM = widthM * (image.height / Math.max(image.width, 1));
-      setCharts((cs) => [
-        ...cs,
-        {
-          id: `${Date.now()}-${cs.length}`,
-          name: file.name.replace(/\.[^.]+$/, ""),
-          image,
-          placement: { centerLon, centerLat, widthM, heightM, rotationDeg: 0 },
-          elevationM: 0,
-          visible: true,
-        },
-      ]);
+      const bytes = await file.arrayBuffer();
+      const hash = await hashImageBytes(bytes);
+      const image = await decodePaddedImage(file);
+
+      const stored = await getChartRecord(hash);
+      let placement: ChartPlacement;
+      let elevationM: number;
+      let name: string;
+      if (stored) {
+        placement = stored.placement;
+        elevationM = stored.elevationM;
+        name = stored.name;
+      } else {
+        const b = track.meta.bounds;
+        const centerLon = (b.lon_min + b.lon_max) / 2;
+        const centerLat = (b.lat_min + b.lat_max) / 2;
+        const mpLon = 111320 * Math.cos(centerLat * DEG2RAD);
+        const bboxW = (b.lon_max - b.lon_min) * mpLon;
+        const widthM = Math.max(300, bboxW * 0.3 || 1000);
+        const heightM = widthM * (image.height / Math.max(image.width, 1));
+        placement = { centerLon, centerLat, widthM, heightM, rotationDeg: 0 };
+        elevationM = 0;
+        name = hash.slice(0, 12); // Default-Label = Kurz-Hash, frei aenderbar
+      }
+
+      setCharts((cs) => {
+        if (cs.some((c) => c.hash === hash)) return cs; // bereits geladen
+        return [
+          ...cs,
+          {
+            id: `${Date.now()}-${cs.length}`,
+            hash,
+            name,
+            image,
+            bytes,
+            placement,
+            elevationM,
+            visible: true,
+            anchored: stored !== null,
+          },
+        ];
+      });
     },
     [track],
+  );
+
+  // Verankerte Karten der Bibliothek, deren bbox den Track-Bereich ueberlappt,
+  // automatisch laden (sobald ein Track gesetzt ist). handleFile leert charts
+  // beim Laden einer neuen Datei → hier werden die passenden wieder ergaenzt.
+  useEffect(() => {
+    if (!track) return;
+    let cancelled = false;
+    void loadChartsForBounds(track.meta.bounds).then(async (hits) => {
+      for (const { rec, bytes } of hits) {
+        if (cancelled) return;
+        let image: ImageBitmap;
+        try {
+          image = await decodePaddedImage(new Blob([bytes]));
+        } catch {
+          continue;
+        }
+        if (cancelled) return;
+        setCharts((cs) =>
+          cs.some((c) => c.hash === rec.hash)
+            ? cs
+            : [
+                ...cs,
+                {
+                  id: `lib-${rec.hash}`,
+                  hash: rec.hash,
+                  name: rec.name,
+                  image,
+                  bytes,
+                  placement: rec.placement,
+                  elevationM: rec.elevationM,
+                  visible: true,
+                  anchored: true,
+                },
+              ],
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [track]);
+
+  // Karte in der Bibliothek verankern (Upsert per Hash): aktuelle Platzierung +
+  // bbox speichern, damit sie kuenftig automatisch wieder geladen wird.
+  const anchorChart = useCallback(
+    async (id: string) => {
+      const target = charts.find((c) => c.id === id);
+      if (!target) return;
+      const rec: ChartRecord = {
+        hash: target.hash,
+        name: target.name,
+        bbox: cornersToBounds(placementToCorners(target.placement)),
+        placement: target.placement,
+        elevationM: target.elevationM,
+        savedAt: Date.now(),
+      };
+      await saveChart(rec, target.bytes);
+      setCharts((cs) => cs.map((c) => (c.id === id ? { ...c, anchored: true } : c)));
+    },
+    [charts],
   );
 
   const dispatchFile = useCallback(
@@ -233,21 +338,28 @@ export default function App() {
     if (!c) return null;
     return {
       placement: c.placement,
+      // Drag aendert die Georeferenz → nicht mehr deckungsgleich mit Bibliothek.
       onChange: (p: ChartPlacement) =>
-        setCharts((cs) => cs.map((x) => (x.id === c.id ? { ...x, placement: p } : x))),
+        setCharts((cs) =>
+          cs.map((x) => (x.id === c.id ? { ...x, placement: p, anchored: false } : x)),
+        ),
     };
   }, [charts, editChartId]);
 
-  // Hilfsfunktion: eine Karte im State patchen.
+  // Hilfsfunktion: eine Karte im State patchen. Aenderungen an Georeferenz/Label
+  // (placement/elevationM/name) loesen den Verankert-Status — Sichtbarkeit nicht.
   const patchChart = useCallback(
     (id: string, patch: Partial<AppChart> | { placement: Partial<ChartPlacement> }) => {
+      const touchesRecord =
+        "placement" in patch || "elevationM" in patch || "name" in patch;
       setCharts((cs) =>
         cs.map((c) => {
           if (c.id !== id) return c;
-          if ("placement" in patch && patch.placement) {
-            return { ...c, placement: { ...c.placement, ...patch.placement } };
-          }
-          return { ...c, ...(patch as Partial<AppChart>) };
+          const next =
+            "placement" in patch && patch.placement
+              ? { ...c, placement: { ...c.placement, ...patch.placement } }
+              : { ...c, ...(patch as Partial<AppChart>) };
+          return touchesRecord ? { ...next, anchored: false } : next;
         }),
       );
     },
@@ -481,6 +593,7 @@ export default function App() {
                       setEditChartId((id) => (id === c.id ? null : c.id))
                     }
                     onPatch={(patch) => patchChart(c.id, patch)}
+                    onAnchor={() => void anchorChart(c.id)}
                     onRemove={() => {
                       setCharts((cs) => cs.filter((x) => x.id !== c.id));
                       setEditChartId((id) => (id === c.id ? null : id));
@@ -621,22 +734,43 @@ function ChartControls({
   editing,
   onToggleEdit,
   onPatch,
+  onAnchor,
   onRemove,
 }: {
   chart: AppChart;
   editing: boolean;
   onToggleEdit: () => void;
   onPatch: (patch: Partial<AppChart> | { placement: Partial<ChartPlacement> }) => void;
+  onAnchor: () => void;
   onRemove: () => void;
 }) {
   const p = chart.placement;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3, borderTop: "1px solid #2a2a2a", paddingTop: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 11, color: "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {chart.name}
-        </span>
+        <input
+          value={chart.name}
+          onChange={(e) => onPatch({ name: e.target.value })}
+          title="Name/Label (z. B. ICAO) — optional"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 11,
+            color: "#ccc",
+            background: "#1a1a1a",
+            border: "1px solid #2a2a2a",
+            borderRadius: 3,
+            padding: "2px 4px",
+          }}
+        />
         <div style={{ display: "flex", gap: 4 }}>
+          <button
+            style={chart.anchored ? btnActiveStyle : btnStyle}
+            onClick={onAnchor}
+            title={chart.anchored ? "In Bibliothek verankert — erneut speichern" : "In Bibliothek verankern (Position merken)"}
+          >
+            {chart.anchored ? "📌" : "📍"}
+          </button>
           <button
             style={editing ? btnActiveStyle : btnStyle}
             onClick={onToggleEdit}
