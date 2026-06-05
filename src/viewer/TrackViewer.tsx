@@ -24,8 +24,8 @@ import {
 } from "./chartPlacement";
 import {
   accelerationColor,
-  computeRankPositions,
   plasmaColor,
+  quantileLinearPositions,
   type Rgba,
 } from "./colorMap";
 import { computeAcceleration3D, robustSymmetricScale } from "./kinematics";
@@ -112,11 +112,17 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
   const trackColorMode: ColorMode =
     colorMode === "flight" || colorMode === "drone" ? "speed" : colorMode;
 
-  // Rang-Position pro Punkt fuer den effektiven Track-Farbmodus.
+  // Farb-Position [0,1] pro Punkt: quantil-entzerrt mit linearer Verteilung
+  // INNERHALB jedes Quantils (s. quantileLinearPosition). Nutzt die Quantil-
+  // grenzen der Pipeline. So werden dichte Cluster (z.B. ~120 km/h) entzerrt,
+  // ohne dass ein Ausreisser die Skala dominiert.
   const rankPositions = useMemo(() => {
-    const values =
-      trackColorMode === "altitude" ? track.points.alt : track.points.speed_kmh;
-    return computeRankPositions(values);
+    const isAlt = trackColorMode === "altitude";
+    const values = isAlt ? track.points.alt : track.points.speed_kmh;
+    const breaks = isAlt
+      ? track.quantile_breaks.altitude_m
+      : track.quantile_breaks.speed_kmh;
+    return quantileLinearPositions(values, breaks);
   }, [track, trackColorMode]);
 
   // 3D-Beschleunigung pro Punkt (m/s²) + robuste, symmetrische Skala. Daraus

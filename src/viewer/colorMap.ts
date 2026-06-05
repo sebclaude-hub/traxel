@@ -85,6 +85,95 @@ export function computeRankPositions(values: (number | null)[]): number[] {
 }
 
 /**
+ * Quantil-entzerrte Farb-Position [0,1] eines Einzelwerts.
+ *
+ * WARUM (nicht reiner Rang, nicht linear): Bei Autofahrten o.ae. liegen sehr
+ * viele Punkte in einem schmalen Wertefenster (z.B. ~120 km/h). Linear wuerden
+ * sie zu einem ununterscheidbaren Farbfleck; reiner Rang spreizt zwar, kennt
+ * aber keine sinnvollen Klassengrenzen fuer die Legende. Hier: jedes der k
+ * Quantile bekommt einen GLEICH langen Farb-Abschnitt (1/k), und INNERHALB
+ * eines Quantils werden die Werte LINEAR (auf die Abschnittslaenge normiert)
+ * verteilt. So bleibt der Cluster entzerrt sichtbar, gleiche Werte bekommen
+ * gleiche Farbe, und die Legende kann die echten Quantilgrenzen zeigen.
+ *
+ * `breaks` sind die k+1 Quantilgrenzen (inkl. min/max), wie sie die Pipeline
+ * liefert (koennen aufgefuellte Duplikate enthalten → degenerierte Bins → 0.5).
+ */
+export function quantileLinearPosition(v: number, breaks: number[]): number {
+  const k = breaks.length - 1;
+  if (k < 1) return 0.5;
+  if (v <= breaks[0]) return 0;
+  if (v >= breaks[k]) return 1;
+  // Erstes Bin i (0..k-1) mit v <= breaks[i+1] (unterste Klasse links-inklusiv).
+  let i = 0;
+  while (i < k - 1 && v > breaks[i + 1]) i++;
+  const lo = breaks[i];
+  const hi = breaks[i + 1];
+  const within = hi > lo ? Math.max(0, Math.min(1, (v - lo) / (hi - lo))) : 0.5;
+  return (i + within) / k;
+}
+
+/** Array-Variante; null/NaN → NaN. */
+export function quantileLinearPositions(
+  values: (number | null)[],
+  breaks: number[],
+): number[] {
+  return values.map((v) =>
+    v === null || !Number.isFinite(v)
+      ? NaN
+      : quantileLinearPosition(v as number, breaks),
+  );
+}
+
+/**
+ * Verteilt Tick-Positionen proportional zu den numerischen Bereichen (lineare
+ * Werteachse), erzwingt aber einen Mindestabstand `minGap` ∈ (0,1) zwischen
+ * aufeinanderfolgenden Ticks, damit die Labels lesbar bleiben. Liefert pro
+ * Eingabe-Grenze eine normalisierte Position [0,1]. Port aus gps_viewer.
+ *
+ * Noetig, weil bei der gestauchten Legende (Werteachse) die Quantilgrenzen sich
+ * in dichten Bereichen draengen und sonst uebereinanderschreiben.
+ */
+export function distributeTicks(breaks: number[], minGap: number): number[] {
+  const n = breaks.length;
+  if (n < 2) return breaks.map(() => 0);
+
+  const min = breaks[0];
+  const max = breaks[n - 1];
+  const span = max - min;
+  if (span <= 0) return breaks.map((_, i) => i / (n - 1));
+
+  const raw = breaks.map((b) => (b - min) / span);
+  const gaps = new Array(n - 1).fill(0).map((_, i) => raw[i + 1] - raw[i]);
+
+  const minG = Math.min(minGap, 1 / (n - 1));
+  for (let iter = 0; iter < 20; iter++) {
+    const small: number[] = [];
+    const big: number[] = [];
+    let deficit = 0;
+    let bigSum = 0;
+    for (let i = 0; i < gaps.length; i++) {
+      if (gaps[i] < minG) {
+        deficit += minG - gaps[i];
+        small.push(i);
+      } else {
+        big.push(i);
+        bigSum += gaps[i] - minG;
+      }
+    }
+    if (deficit < 1e-6 || bigSum < 1e-6) break;
+    const factor = Math.min(1, bigSum > 0 ? deficit / bigSum : 0);
+    for (const i of small) gaps[i] = minG;
+    for (const i of big) gaps[i] = gaps[i] - (gaps[i] - minG) * factor;
+  }
+
+  const positions = [0];
+  for (let i = 0; i < gaps.length; i++) positions.push(positions[i] + gaps[i]);
+  const total = positions[positions.length - 1] || 1;
+  return positions.map((p) => p / total);
+}
+
+/**
  * Farbe fuer vorzeichenbehaftete, normalisierte Beschleunigung aNorm ∈ [−1, 1]:
  *   aNorm ≥ 0 (beschleunigen) → YlGnBu nach Betrag (Gelb → Blau),
  *   aNorm <  0 (bremsen)      → YlOrRd nach Betrag (Gelb → Rot).
