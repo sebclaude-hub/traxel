@@ -1,9 +1,5 @@
 // ---------------------------------------------------------------------------
 // 3D-Track-Viewer: deck.gl-Canvas mit Vorhang, Track-Linie und Hover-Tooltip.
-//
-// Vereinfachter Port aus gps_viewer/src/components/TrackViewer.tsx fuer den
-// Phase-3-Durchstich: ohne Terrain-Mesh, Karten-Overlays, Cut-Hervorhebung,
-// Offset-Slider und Satelliten. Die kommen in spaeteren Phasen dazu.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -14,9 +10,11 @@ import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { sampleDem } from "../pipeline/terrain/sample";
 import type { ColorMode, DemGrid, TrackData } from "../types";
 import { buildCurtainSegments, makeCurtainLayer } from "./curtainLayer";
-import { makeTerrainLayer } from "./terrainLayer";
+import { gridToMesh } from "./demMesh";
+import { makeTerrainLayer, makeSatelliteLayer } from "./terrainLayer";
 import { makeChartLayer } from "./chartLayer";
 import type { ChartOverlay } from "./chartMesh";
+import type { SatelliteImage } from "../pipeline/terrain/satellite";
 import {
   cornerDragToPlacement,
   placementToCorners,
@@ -37,7 +35,6 @@ export interface PlacedChart {
   image: ImageBitmap | HTMLImageElement;
 }
 
-/** Aktuell bearbeitete Karte: Platzierung + Aenderungs-Callback fuer die Griffe. */
 export interface EditChart {
   placement: ChartPlacement;
   onChange: (p: ChartPlacement) => void;
@@ -49,8 +46,17 @@ interface Props {
   colorMode: ColorMode;
   showCurtain: boolean;
   zScale: number;
-  /** Konstanter Hoehen-Versatz des Tracks in echten Metern (Darstellung). */
+  /**
+   * Versatz des DEM in echten Metern — verschiebt Terrain, Karten und
+   * Satellitenbilder gemeinsam nach oben/unten; der GPS-Track bleibt
+   * unveraendert (er ist Grundwahrheit). Korrigiert z.B. den Ellipsoid-/
+   * Geoid-Versatz zwischen SkyDemon-GPS (WGS-84-ellipsoidisch) und DEM (NN).
+   */
   zOffset?: number;
+  /** Hypsometrisches Terrain rendern. */
+  showTerrain?: boolean;
+  /** Satellitenbild auf dem DEM draped rendern (liegt unter Anflugkarten). */
+  satelliteImage?: SatelliteImage | null;
   charts?: PlacedChart[];
   editChart?: EditChart | null;
 }
@@ -76,7 +82,6 @@ function buildInitialViewState(track: TrackData): DeckViewState {
   };
 }
 
-/** Min ueber nicht-null-Hoehen, per Schleife (Spread sprengt bei langen Tracks den Stack). */
 function minAlt(alts: (number | null)[]): number {
   let min = Infinity;
   for (const a of alts) {
@@ -85,13 +90,22 @@ function minAlt(alts: (number | null)[]): number {
   return Number.isFinite(min) ? min : 0;
 }
 
-export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffset = 0, charts = [], editChart = null }: Props) {
+export function TrackViewer({
+  track,
+  dem,
+  colorMode,
+  showCurtain,
+  zScale,
+  zOffset = 0,
+  showTerrain = true,
+  satelliteImage = null,
+  charts = [],
+  editChart = null,
+}: Props) {
   const [viewState, setViewState] = useState<DeckViewState>(() =>
     buildInitialViewState(track),
   );
 
-  // Drag-Zustand der Karten-Griffe. baseRef haelt die Platzierung beim
-  // Drag-Start fest (stabile Skalierung beim Eck-Griff).
   const [handleDragging, setHandleDragging] = useState(false);
   const dragRef = useRef<{
     kind: "center" | "corner";
@@ -102,31 +116,21 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
   } | null>(null);
 
   const altBase = useMemo(() => minAlt(track.points.alt), [track]);
-  // z-Versatz (echte Meter) vor der Ueberhoehung → skaliert konsistent mit dem Terrain.
+
+  // GPS-Track ist Grundwahrheit → kein Versatz auf die Track-Hoehe.
   const exagAlt = useCallback(
-    (alt: number | null) => altBase + ((alt ?? altBase) + zOffset - altBase) * zScale,
-    [altBase, zScale, zOffset],
+    (alt: number | null) => altBase + ((alt ?? altBase) - altBase) * zScale,
+    [altBase, zScale],
   );
 
-  // Die Track-Linie bleibt bei flight/drone auf Speed-Plasma; die Klassen-
-  // faerbung passiert nur am Vorhang. Fuer speed/altitude folgt sie dem Modus.
   const trackColorMode: ColorMode =
     colorMode === "flight" || colorMode === "drone" ? "speed" : colorMode;
 
-  // Farb-Position [0,1] pro Punkt: quantil-entzerrt mit linearer Verteilung
-  // INNERHALB jedes Quantils (s. quantileLinearPosition). Werte + Grenzen je
-  // Modus liefert colorScaleFor (speed/altitude/altitude_gnd) — dieselbe Quelle
-  // wie die Legende. So werden dichte Cluster (z.B. ~120 km/h) entzerrt, ohne
-  // dass ein Ausreisser die Skala dominiert.
   const rankPositions = useMemo(() => {
     const { values, breaks } = colorScaleFor(track, trackColorMode);
     return quantileLinearPositions(values, breaks);
   }, [track, trackColorMode]);
 
-  // Vorzeichenbehafteter Kanal — je nach Modus 3D-Beschleunigung (m/s²) ODER
-  // Energieaenderung dH/dt (m/s). Robuste symmetrische Skala → signedNorm ∈
-  // [−1,1] fuer die YlOrRd/YlGnBu-Farbgebung; signedRaw + signedUnit fuer den
-  // Tooltip. Nur in den signierten Modi berechnet (sonst null).
   const { signedRaw, signedNorm, signedUnit } = useMemo(() => {
     const raw =
       colorMode === "accel"
@@ -147,9 +151,6 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     [track, dem, rankPositions, altBase, zScale, signedNorm, zOffset],
   );
 
-  // Track als individuelle, eingefaerbte Segmente. Pro Segment: Rang t (speed/
-  // altitude/energy) und normalisierter Signed-Wert signedN (accel/energy_rate),
-  // je gemittelt.
   const pathSegments = useMemo(() => {
     const { lon, lat, alt } = track.points;
     const mean2 = (a: number | null, b: number | null): number => {
@@ -178,17 +179,30 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     return segs;
   }, [track, rankPositions, signedNorm, exagAlt]);
 
+  // DEM-Mesh: einmal berechnet, von Terrain-, Satelliten- und Chart-Layer geteilt.
+  // demOffset = zOffset verschiebt alle DEM-basierten Layer gemeinsam.
+  const demMesh = useMemo(
+    () => (dem ? gridToMesh(dem, altBase, zScale, zOffset) : null),
+    [dem, altBase, zScale, zOffset],
+  );
+
   const layers = useMemo(() => {
     const result = [];
 
-    // Terrain zuerst, damit Vorhang und Track darueber liegen.
-    if (dem) result.push(makeTerrainLayer(dem, altBase, zScale));
+    // 1. Hypsometrisches Terrain (unterste Ebene).
+    if (demMesh && showTerrain) result.push(makeTerrainLayer(demMesh));
 
-    // Karten-Overlays auf das Terrain drapen (unter Vorhang/Track).
-    for (const c of charts) {
-      result.push(makeChartLayer(c.overlay, c.image, dem, altBase, zScale));
+    // 2. Satellitenbild: liegt ueber dem Terrain, aber unter Anflugkarten.
+    if (demMesh && dem && satelliteImage) {
+      result.push(makeSatelliteLayer(demMesh, dem, satelliteImage.image, satelliteImage.bounds));
     }
 
+    // 3. Anflugkarten (draped auf dem DEM mit demOffset).
+    for (const c of charts) {
+      result.push(makeChartLayer(c.overlay, c.image, dem, altBase, zScale, zOffset));
+    }
+
+    // 4. Vorhang und Track.
     if (showCurtain) result.push(makeCurtainLayer(curtainSegments, colorMode));
 
     result.push(
@@ -211,8 +225,6 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
       }),
     );
 
-    // Unsichtbarer Pickable-Layer fuer den Hover-Tooltip (deck.gl pickt auch
-    // bei alpha = 0, weil das Picking eine separate Off-Screen-Pass nutzt).
     result.push(
       new ScatterplotLayer<number>({
         id: "track-pick",
@@ -226,17 +238,18 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
         radiusUnits: "pixels",
         getFillColor: [0, 0, 0, 0],
         pickable: true,
-        updateTriggers: { getPosition: [zScale, altBase, zOffset] },
+        updateTriggers: { getPosition: [zScale, altBase] },
       }),
     );
 
-    // Georeferenzier-Griffe der aktuell bearbeiteten Karte (zuoberst).
+    // 5. Chart-Griffe (immer zuoberst).
     if (editChart) {
       const pl = editChart.placement;
       const tr = placementToCorners(pl).corner_tr;
+      // Griff-Z auf verschobenem DEM (demOffset einrechnen).
       const zAt = (lon: number, lat: number) => {
         const terr = dem ? sampleDem(dem, lon, lat) ?? 0 : 0;
-        return altBase + (terr - altBase) * zScale + 60; // ueber der Karte
+        return altBase + (terr + zOffset - altBase) * zScale + 60;
       };
       const handles = [
         { kind: "center", position: [pl.centerLon, pl.centerLat, zAt(pl.centerLon, pl.centerLat)], color: [230, 80, 230, 255] },
@@ -254,27 +267,23 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
           getLineColor: [255, 255, 255, 255],
           lineWidthMinPixels: 2,
           pickable: true,
-          // Immer obenauf, damit die Griffe nicht hinter Terrain-Graten
-          // verschwinden (und gut greifbar bleiben).
           parameters: { depthCompare: "always" },
-          updateTriggers: { getPosition: [editChart, zScale, altBase, dem] },
+          updateTriggers: { getPosition: [editChart, zScale, altBase, dem, zOffset] },
         }),
       );
     }
 
     return result;
-  }, [dem, charts, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase, editChart]);
+  }, [demMesh, showTerrain, satelliteImage, dem, charts, curtainSegments, pathSegments, showCurtain, colorMode, track, exagAlt, zScale, altBase, zOffset, editChart]);
 
-  // deck.gl-Callback-Typen (ViewStateChangeParameters/PickingInfo) passen nicht
-  // auf eine handgeschnittene Form — wie im Ursprungs-Viewer `any`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleViewStateChange = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ({ viewState: vs }: any) => setViewState(vs as DeckViewState),
     [],
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const getTooltip = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (info: any) => {
       if (!info || info.layer?.id !== "track-pick") return null;
       const idx = info.object as number | undefined;
@@ -292,8 +301,6 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
       lines.push(`MSL ${formatAltitude(alt)}`);
       if (above !== null) lines.push(`üG ${Math.round(above)} m`);
       if (sr !== null && Number.isFinite(sr)) {
-        // Aktiver Signed-Modus: Beschl. (m/s², + schneller) bzw. ΔEnergie
-        // (m/s, + Energiegewinn).
         const lbl = colorMode === "accel" ? "Beschl." : "ΔEnergie";
         lines.push(`${lbl} ${sr >= 0 ? "+" : "−"}${Math.abs(sr).toFixed(1)} ${signedUnit}`);
       }
@@ -314,8 +321,6 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     [track, signedRaw, signedUnit, colorMode],
   );
 
-  // Cursor auf die Karten-Hoehe zurueckprojizieren (statt z=0) — sonst springt
-  // die Karte in der gekippten Ansicht weit weg. Fallback: info.coordinate.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const groundAt = useCallback((info: any, z: number): [number, number] | null => {
     if (info?.viewport && typeof info.x === "number" && typeof info.y === "number") {
@@ -329,14 +334,13 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     return info?.coordinate ? [info.coordinate[0], info.coordinate[1]] : null;
   }, []);
 
-  // Drag der Karten-Griffe (auf DeckGL-Ebene; true zurueckgeben stoppt das Pan).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onDragStart = useCallback(
     (info: any) => {
       if (!editChart || !info?.object || info.layer?.id !== "chart-handles") return false;
       const base = editChart.placement;
       const terr = dem ? sampleDem(dem, base.centerLon, base.centerLat) ?? 0 : 0;
-      const chartZ = altBase + (terr - altBase) * zScale;
+      const chartZ = altBase + (terr + zOffset - altBase) * zScale;
       const start = groundAt(info, chartZ);
       if (!start) return false;
       dragRef.current = {
@@ -349,8 +353,9 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
       setHandleDragging(true);
       return true;
     },
-    [editChart, dem, altBase, zScale, groundAt],
+    [editChart, dem, altBase, zScale, zOffset, groundAt],
   );
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onDrag = useCallback(
     (info: any) => {
@@ -360,7 +365,6 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
       if (!coord) return false;
       const [lon, lat] = coord;
       if (d.kind === "center") {
-        // Per Delta verschieben (robust gegen Rest-Versatz der Projektion).
         editChart.onChange({
           ...d.base,
           centerLon: d.base.centerLon + (lon - d.startLon),
@@ -373,6 +377,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     },
     [editChart, groundAt],
   );
+
   const onDragEnd = useCallback(() => {
     dragRef.current = null;
     setHandleDragging(false);

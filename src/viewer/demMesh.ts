@@ -52,8 +52,11 @@ function hypsoColor(elev: number): [number, number, number] {
  * Konvertiert ein DEM-Grid zu einem Mesh in Meter-Offsets vom Bounds-Zentrum.
  * SimpleMeshLayer interpretiert die Positionen als Meter-Offsets vom
  * getPosition-Anker (Equirectangular-Naeherung, gueltig fuer wenige Grad).
+ *
+ * demOffset (m): verschiebt das DEM-Terrain nach oben/unten ohne den Track
+ * zu beruehren — korrigiert den Geoid-/Ellipsoid-Versatz zwischen GPS und DEM.
  */
-export function gridToMesh(grid: DemGrid, altBase = 0, zScale = 1): DemMesh {
+export function gridToMesh(grid: DemGrid, altBase = 0, zScale = 1, demOffset = 0): DemMesh {
   const { n_rows, n_cols, lat_min, lat_max, lon_min, lon_max, elevations } = grid;
 
   const latCenter = (lat_min + lat_max) / 2;
@@ -73,7 +76,7 @@ export function gridToMesh(grid: DemGrid, altBase = 0, zScale = 1): DemMesh {
       const elev = elevations[r * n_cols + col] ?? 0;
       positions[p++] = (lon - lonCenter) * mPerLon;
       positions[p++] = (lat - latCenter) * mPerLat;
-      positions[p++] = altBase + (elev - altBase) * zScale;
+      positions[p++] = altBase + (elev + demOffset - altBase) * zScale;
       const [cr, cg, cb] = hypsoColor(elev);
       colors[cI++] = cr;
       colors[cI++] = cg;

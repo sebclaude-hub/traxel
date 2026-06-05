@@ -12,3 +12,4 @@ export * from "./build";
 export * from "./sample";
 export * from "./enrich-terrain";
 export * from "./tile-cache";
+export * from "./satellite";

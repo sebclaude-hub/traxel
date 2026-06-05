@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import type { DemGrid, SatelliteData, TrackBounds, TrackData } from "../types";
+import type { SatBounds, SatelliteImage } from "../pipeline/terrain/satellite";
 import type {
   PipelineRequest,
   PipelineResponse,
@@ -111,5 +112,16 @@ export function usePipeline() {
     [post],
   );
 
-  return { loadTrackFile, loadTrackText, loadTerrain };
+  const loadSatellite = useCallback(
+    async (bounds: TrackBounds): Promise<SatelliteImage> => {
+      const res = await post({ kind: "satellite", bounds });
+      if (res.ok && res.kind === "satellite") {
+        return { image: res.image, bounds: res.bounds as SatBounds };
+      }
+      throw new Error("Unerwartete Antwort fuer Satelliten-Anfrage");
+    },
+    [post],
+  );
+
+  return { loadTrackFile, loadTrackText, loadTerrain, loadSatellite };
 }

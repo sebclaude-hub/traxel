@@ -82,6 +82,7 @@ function buildFromTerrainSubgrid(
   demGrid: DemGrid,
   altBase: number,
   zScale: number,
+  demOffset = 0,
 ): ChartMesh | null {
   // Achsenparallele Bounding-Box ueber ALLE vier Ecken (auch fuer gedrehte
   // Karten korrekt). Der Subgrid deckt die Box ab; ausserhalb des gedrehten
@@ -148,7 +149,7 @@ function buildFromTerrainSubgrid(
       const elev = demGrid.elevations[r * demGrid.n_cols + c] ?? 0;
       positions[pIdx++] = (lon - lon_center) * mpLon;
       positions[pIdx++] = (lat - lat_center) * mpLat;
-      positions[pIdx++] = altBase + (elev - altBase) * zScale + Z_LIFT_SUBGRID_M;
+      positions[pIdx++] = altBase + (elev + demOffset - altBase) * zScale + Z_LIFT_SUBGRID_M;
 
       const pm = toM(lon, lat);
       const relx = pm[0] - tlM[0];
@@ -249,6 +250,7 @@ function buildFromBilinearCorners(
   altBase: number,
   zScale: number,
   subdivision?: number | null,
+  demOffset = 0,
 ): ChartMesh {
   const requested = subdivision ?? chart.subdivision ?? computeSubdivision(chart, demGrid);
   const N = Math.max(2, requested);
@@ -275,7 +277,7 @@ function buildFromBilinearCorners(
       }
       positions[pIdx++] = (lon - lon_center) * mpLon;
       positions[pIdx++] = (lat - lat_center) * mpLat;
-      positions[pIdx++] = altBase + (elev - altBase + Z_LIFT_BILINEAR_RAW_M) * zScale;
+      positions[pIdx++] = altBase + (elev + demOffset - altBase + Z_LIFT_BILINEAR_RAW_M) * zScale;
       texCoords[tIdx++] = u;
       texCoords[tIdx++] = v;
     }
@@ -307,13 +309,14 @@ export function buildChartMesh(
   altBase = 0,
   zScale = 1,
   subdivision?: number | null,
+  demOffset = 0,
 ): ChartMesh {
   // Mit DEM IMMER (auch gedreht) den Terrain-Subgrid nutzen: identische
   // Vertices und Triangulation wie das Terrain → kein Durchstoßen moeglich.
   // Bilinear nur ohne DEM oder bei erzwungener Subdivision.
   if (demGrid && subdivision == null && chart.subdivision == null) {
-    const meshA = buildFromTerrainSubgrid(chart, demGrid, altBase, zScale);
+    const meshA = buildFromTerrainSubgrid(chart, demGrid, altBase, zScale, demOffset);
     if (meshA) return meshA;
   }
-  return buildFromBilinearCorners(chart, demGrid, altBase, zScale, subdivision);
+  return buildFromBilinearCorners(chart, demGrid, altBase, zScale, subdivision, demOffset);
 }

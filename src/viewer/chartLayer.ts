@@ -19,8 +19,9 @@ export function makeChartLayer(
   demGrid: DemGrid | null,
   altBase = 0,
   zScale = 1,
+  demOffset = 0,
 ) {
-  const mesh = buildChartMesh(chart, demGrid, altBase, zScale);
+  const mesh = buildChartMesh(chart, demGrid, altBase, zScale, undefined, demOffset);
 
   const deckMesh = {
     attributes: {

@@ -12,6 +12,7 @@
 
 import { processGpx, processKml, processNmea } from "../pipeline";
 import { buildTerrain } from "../pipeline/terrain";
+import { buildSatelliteImage, type SatBounds } from "../pipeline/terrain/satellite";
 import type { DemGrid, SatelliteData, TrackBounds, TrackData } from "../types";
 
 export interface TerrainOpts {
@@ -24,13 +25,15 @@ export type PipelineRequest =
   | { id: number; kind: "gpx"; text: string; name: string }
   | { id: number; kind: "kml"; text: string; name: string }
   | { id: number; kind: "nmea"; text: string; name: string }
-  | { id: number; kind: "terrain"; bounds: TrackBounds; opts?: TerrainOpts };
+  | { id: number; kind: "terrain"; bounds: TrackBounds; opts?: TerrainOpts }
+  | { id: number; kind: "satellite"; bounds: TrackBounds };
 
 export type PipelineResponse =
   | { id: number; ok: true; kind: "gpx"; track: TrackData }
   | { id: number; ok: true; kind: "kml"; track: TrackData }
   | { id: number; ok: true; kind: "nmea"; track: TrackData; satellites: SatelliteData | null }
   | { id: number; ok: true; kind: "terrain"; dem: DemGrid }
+  | { id: number; ok: true; kind: "satellite"; image: ImageBitmap; bounds: SatBounds }
   | { id: number; ok: false; error: string };
 
 function post(res: PipelineResponse): void {
@@ -55,6 +58,16 @@ self.onmessage = async (e: MessageEvent<PipelineRequest>) => {
       case "terrain":
         post({ id: req.id, ok: true, kind: "terrain", dem: await buildTerrain(req.bounds, req.opts ?? {}) });
         break;
+      case "satellite": {
+        const sat = await buildSatelliteImage(req.bounds);
+        // ImageBitmap als Transferable uebertragen (kein Kopieren).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (self as any).postMessage(
+          { id: req.id, ok: true, kind: "satellite", image: sat.image, bounds: sat.bounds },
+          [sat.image],
+        );
+        break;
+      }
       default:
         throw new Error("Unbekannter Request-Typ");
     }

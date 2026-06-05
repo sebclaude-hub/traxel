@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
 import { applyCuts, type CutMode, type CutSpec } from "../pipeline";
 import { enrichTrackWithTerrain } from "../pipeline/terrain";
+import type { SatelliteImage } from "../pipeline/terrain/satellite";
 import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
 import { cornersToBounds } from "../library/spatial";
@@ -32,6 +33,9 @@ import { usePipeline } from "./usePipeline";
 const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 
 type TerrainState = "idle" | "loading" | "ok" | "error";
+
+// "topo" = hypsometrische Faerbung, "sat" = Satellitenbild, "off" = kein Terrain.
+type TerrainView = "topo" | "sat" | "off";
 
 // Terrain-Detailstufen: hoehere Stufen laden mehr/feinere Kacheln (langsamer,
 // mehr Speicher), dafuer schaerferes Gelaende.
@@ -80,7 +84,7 @@ async function decodePaddedImage(src: Blob): Promise<ImageBitmap> {
 }
 
 export default function App() {
-  const { loadTrackText, loadTerrain } = usePipeline();
+  const { loadTrackText, loadTerrain, loadSatellite } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
   const [satellites, setSatellites] = useState<SatelliteData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,8 +101,11 @@ export default function App() {
 
   const [dem, setDem] = useState<DemGrid | null>(null);
   const [terrainState, setTerrainState] = useState<TerrainState>("idle");
-  const [showTerrain, setShowTerrain] = useState(true);
+  const [terrainView, setTerrainView] = useState<TerrainView>("topo");
   const [terrainDetail, setTerrainDetail] = useState<TerrainDetail>("standard");
+
+  const [satelliteImage, setSatelliteImage] = useState<SatelliteImage | null>(null);
+  const [satelliteState, setSatelliteState] = useState<TerrainState>("idle");
 
   // Aktiver Trackpunkt (steuert den SkyPlot). Bei Trackwechsel zurueck auf 0.
   const [activeIdx, setActiveIdx] = useState(0);
@@ -156,14 +163,40 @@ export default function App() {
     };
   }, [track, loadTerrain, terrainDetail]);
 
+  // Satellitenbilder laden, sobald der Nutzer "Satellit"-Ansicht waehlt.
+  // Neu laden wenn Track oder Detailstufe wechselt.
+  useEffect(() => {
+    if (terrainView !== "sat" || !track) {
+      return;
+    }
+    let cancelled = false;
+    setSatelliteImage(null);
+    setSatelliteState("loading");
+    loadSatellite(track.meta.bounds)
+      .then((sat) => {
+        if (!cancelled) {
+          setSatelliteImage(sat);
+          setSatelliteState("ok");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSatelliteState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [terrainView, track, loadSatellite]);
+
   // Gemeinsamer Post-Load-Code: State setzen, Cuts/Charts zuruecksetzen. Wird
   // vom Datei-Import UND vom Wiederoeffnen aus der Bibliothek genutzt.
   const applyLoadedTrack = useCallback((td: TrackData, sat: SatelliteData | null) => {
     setTrack(td);
     setSatellites(sat);
-    setCuts([]); // Cuts beim Laden einer neuen Datei zuruecksetzen
+    setCuts([]);
     setCharts([]);
     setEditChartId(null);
+    setSatelliteImage(null);
+    setSatelliteState("idle");
   }, []);
 
   const handleFile = useCallback(
@@ -424,17 +457,18 @@ export default function App() {
     [],
   );
 
-  // Nur wenn Terrain sichtbar ist, gibt es einen Boden fuer above_terrain/AGL.
-  const activeDem = showTerrain ? dem : null;
+  // DEM-Effekte aktiv (AGL, Vorhang-Boden, Flug-Klassifikation) wenn Terrain
+  // nicht ausgeschaltet; unabhaengig davon ob Topographie oder Satellit angezeigt.
+  const activeDem = terrainView !== "off" ? dem : null;
 
-  // Track mit Terrain anreichern (above_terrain, track_mode) — fuer Tooltip
-  // und Flug/Boden-Anzeige. Ohne Terrain bleibt der Originaltrack.
+  // Track mit Terrain anreichern (above_terrain, track_mode). demOffset
+  // korrigiert den Geoid-/Ellipsoid-Versatz beim AGL-Vergleich.
   const viewTrack = useMemo(
     () =>
       displayTrack && activeDem
-        ? enrichTrackWithTerrain(displayTrack, activeDem)
+        ? enrichTrackWithTerrain(displayTrack, activeDem, zOffset)
         : displayTrack,
-    [displayTrack, activeDem],
+    [displayTrack, activeDem, zOffset],
   );
 
   // activeIdx auf die (ggf. durch Cuts verkuerzte) Laenge begrenzen.
@@ -501,6 +535,8 @@ export default function App() {
             {terrainState === "ok" &&
               ` · ${viewTrack.meta.track_mode === "flight" ? "✈ Flug" : "🚗 Boden"}`}
             {terrainState === "error" && " · Terrain nicht verfügbar"}
+            {satelliteState === "loading" && " · Satellit lädt…"}
+            {satelliteState === "error" && " · Satellit nicht verfügbar"}
           </span>
           <button style={btnStyle} onClick={() => fileInputRef.current?.click()}>
             Andere Datei…
@@ -543,6 +579,8 @@ export default function App() {
               showCurtain={showCurtain}
               zScale={zScale}
               zOffset={zOffset}
+              showTerrain={terrainView === "topo"}
+              satelliteImage={terrainView === "sat" ? satelliteImage : null}
               charts={placedCharts}
               editChart={editChart}
             />
@@ -562,13 +600,14 @@ export default function App() {
                 onChange={setShowCurtain}
               />
               {dem && (
-                <Segmented<boolean>
-                  value={showTerrain}
+                <Segmented<TerrainView>
+                  value={terrainView}
                   options={[
-                    [true, "Terrain"],
-                    [false, "aus"],
+                    ["topo", "Topographie"],
+                    ["sat", "Satellit"],
+                    ["off", "aus"],
                   ]}
-                  onChange={setShowTerrain}
+                  onChange={setTerrainView}
                 />
               )}
               {(terrainState === "ok" || terrainState === "loading") && (

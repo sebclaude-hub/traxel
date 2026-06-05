@@ -25,8 +25,12 @@ function median(values: number[]): number {
 /**
  * Liefert eine neue TrackData mit gefuelltem terrain_elev/above_terrain,
  * gesetztem track_mode und has_terrain. Der Originaltrack bleibt unveraendert.
+ *
+ * demOffset (m): wird zum DEM-Sample addiert, bevor AGL berechnet wird —
+ * korrigiert den Geoid-/Ellipsoid-Versatz zwischen GPS-Track und DEM.
+ * terrain_elev bleibt der rohe DEM-Wert (fuer spaeteren Vergleich nutzbar).
  */
-export function enrichTrackWithTerrain(track: TrackData, dem: DemGrid): TrackData {
+export function enrichTrackWithTerrain(track: TrackData, dem: DemGrid, demOffset = 0): TrackData {
   const { lat, lon, alt } = track.points;
   const n = lat.length;
 
@@ -42,7 +46,7 @@ export function enrichTrackWithTerrain(track: TrackData, dem: DemGrid): TrackDat
 
     const a = alt[i];
     if (a !== null && terr !== null) {
-      const agl = a - terr;
+      const agl = a - (terr + demOffset);
       aboveTerrain[i] = agl;
       aglForMedian.push(agl);
     } else {

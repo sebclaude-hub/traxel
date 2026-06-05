@@ -108,7 +108,7 @@ export function buildCurtainSegments(
   altBase: number,
   zScale: number,
   signedNorm: (number | null)[] | null = null,
-  zOffset = 0,
+  demOffset = 0,
 ): CurtainSegment[] {
   const { lat, lon, alt } = track.points;
   const n = lat.length;
@@ -138,11 +138,11 @@ export function buildCurtainSegments(
     const px = (-dy / len) * EPS;
     const py = (dx / len) * EPS;
 
-    // z-Versatz nur auf die Track-Oberkante (echte Meter, vor der Ueberhoehung);
-    // die Terrain-/0-Unterkante bleibt unveraendert → Vorhang folgt korrekt.
-    const top = (exag(altA + zOffset) + exag(altB + zOffset)) / 2;
+    // Track-Oberkante: GPS-Hoehe ist Grundwahrheit, kein Versatz.
+    const top = (exag(altA) + exag(altB)) / 2;
 
-    // Boden + rohe Terrain-Hoehe (fuer AGL). dem ? Terrain : 0 m MSL.
+    // Boden: DEM verschoben um demOffset (korrigiert Geoid/Ellipsoid-Differenz).
+    // AGL = GPS-Hoehe − (rohe Terrain-Hoehe + demOffset).
     let bot = 0;
     let terrMeanRaw: number | null = null;
     if (dem) {
@@ -150,14 +150,15 @@ export function buildCurtainSegments(
       const bB = sampleDem(dem, lonB, latB);
       if (bA !== null && bB !== null) {
         terrMeanRaw = (bA + bB) / 2;
-        bot = exag(terrMeanRaw);
+        bot = exag(terrMeanRaw + demOffset);
       }
     }
     const base = Math.min(top, bot);
     const height = Math.abs(top - bot);
 
     const altMslRaw = (altA + altB) / 2;
-    const altAglRaw = terrMeanRaw !== null ? altMslRaw - terrMeanRaw : null;
+    const altAglRaw =
+      terrMeanRaw !== null ? altMslRaw - (terrMeanRaw + demOffset) : null;
 
     const signedN = signedNorm
       ? meanOrNaN(signedNorm[i], signedNorm[i + 1])
