@@ -442,24 +442,29 @@ export default function App() {
     ? Math.min(activeIdx, Math.max(0, viewTrack.meta.n_points - 1))
     : 0;
 
-  // Flug-/Drohnen-Farbmodi nur mit Terrain. Ist Terrain aus, faellt ein
-  // aktiver flight/drone-Modus auf Speed zurueck.
-  const effColorMode: ColorMode =
-    !activeDem && (colorMode === "flight" || colorMode === "drone")
+  // Flug-/Drohnen-Farbmodi UND "Höhe GND" brauchen Terrain. Ist Terrain aus,
+  // faellt flight/drone auf Speed und altitude_gnd auf Höhe (MSL) zurueck.
+  const effColorMode: ColorMode = activeDem
+    ? colorMode
+    : colorMode === "flight" || colorMode === "drone"
       ? "speed"
-      : colorMode;
-  // "Beschl." (3D-Tangentialbeschleunigung) braucht kein Terrain → in beiden Listen.
+      : colorMode === "altitude_gnd"
+        ? "altitude"
+        : colorMode;
+  // "Beschl." (3D-Tangentialbeschleunigung) braucht kein Terrain → in beiden
+  // Listen. "Höhe GND" (über Grund) nur mit Terrain; "Höhe MSL" immer.
   const colorOptions: [ColorMode, string][] = activeDem
     ? [
         ["speed", "Tempo"],
-        ["altitude", "Höhe"],
+        ["altitude", "Höhe MSL"],
+        ["altitude_gnd", "Höhe GND"],
         ["flight", "Flug"],
         ["drone", "Drohne"],
         ["accel", "Beschl."],
       ]
     : [
         ["speed", "Geschwindigkeit"],
-        ["altitude", "Höhe"],
+        ["altitude", "Höhe MSL"],
         ["accel", "Beschl."],
       ];
 

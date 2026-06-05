@@ -23,10 +23,13 @@ import {
   rgbaCss,
 } from "../viewer/colorMap";
 import { droneLegendItems, flightLegendItems } from "../viewer/curtainLayer";
+import { colorScaleFor } from "../viewer/colorScale";
+import { useMemo } from "react";
 
 const t = {
   speed: "Tempo",
   altitude: "Höhe (MSL)",
+  altitudeGnd: "Höhe (GND)",
   brakeLeft: "− Bremsen",
   accelRight: "Beschl. +",
 };
@@ -114,6 +117,23 @@ function GradientLegend({
 }
 
 export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData }) {
+  // Grenzen + Titel/Einheit fuer die Gradient-Modi (memoisiert; altitude_gnd
+  // rechnet die AGL-Quantile aus dem terrain-angereicherten Track). Identische
+  // Grenzen-Quelle wie TrackViewer (colorScaleFor) → Legende passt zur Faerbung.
+  const grad = useMemo(() => {
+    if (mode !== "speed" && mode !== "altitude" && mode !== "altitude_gnd") {
+      return null;
+    }
+    const { breaks } = colorScaleFor(track, mode);
+    const meta =
+      mode === "speed"
+        ? { title: t.speed, unit: "km/h" }
+        : mode === "altitude"
+          ? { title: t.altitude, unit: "m" }
+          : { title: t.altitudeGnd, unit: "m" };
+    return { ...meta, breaks };
+  }, [mode, track]);
+
   // Diskrete Klassen (Flug/Drohne).
   if (mode === "flight" || mode === "drone") {
     const items = mode === "flight" ? flightLegendItems() : droneLegendItems();
@@ -142,11 +162,11 @@ export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData
     );
   }
 
-  // Tempo / Höhe: gestauchte Werteachsen-Legende.
-  if (mode === "altitude") {
-    return <GradientLegend title={t.altitude} unit="m" breaks={track.quantile_breaks.altitude_m} />;
+  // Tempo / Höhe (MSL/GND): gestauchte Werteachsen-Legende.
+  if (grad) {
+    return <GradientLegend title={grad.title} unit={grad.unit} breaks={grad.breaks} />;
   }
-  return <GradientLegend title={t.speed} unit="km/h" breaks={track.quantile_breaks.speed_kmh} />;
+  return null;
 }
 
 // --- Styles ----------------------------------------------------------------

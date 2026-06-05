@@ -29,6 +29,7 @@ import {
   type Rgba,
 } from "./colorMap";
 import { computeAcceleration3D, robustSymmetricScale } from "./kinematics";
+import { colorScaleFor } from "./colorScale";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
 export interface PlacedChart {
@@ -113,15 +114,12 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     colorMode === "flight" || colorMode === "drone" ? "speed" : colorMode;
 
   // Farb-Position [0,1] pro Punkt: quantil-entzerrt mit linearer Verteilung
-  // INNERHALB jedes Quantils (s. quantileLinearPosition). Nutzt die Quantil-
-  // grenzen der Pipeline. So werden dichte Cluster (z.B. ~120 km/h) entzerrt,
-  // ohne dass ein Ausreisser die Skala dominiert.
+  // INNERHALB jedes Quantils (s. quantileLinearPosition). Werte + Grenzen je
+  // Modus liefert colorScaleFor (speed/altitude/altitude_gnd) — dieselbe Quelle
+  // wie die Legende. So werden dichte Cluster (z.B. ~120 km/h) entzerrt, ohne
+  // dass ein Ausreisser die Skala dominiert.
   const rankPositions = useMemo(() => {
-    const isAlt = trackColorMode === "altitude";
-    const values = isAlt ? track.points.alt : track.points.speed_kmh;
-    const breaks = isAlt
-      ? track.quantile_breaks.altitude_m
-      : track.quantile_breaks.speed_kmh;
+    const { values, breaks } = colorScaleFor(track, trackColorMode);
     return quantileLinearPositions(values, breaks);
   }, [track, trackColorMode]);
 

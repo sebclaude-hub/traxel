@@ -41,7 +41,15 @@ export interface QuantileBreaks {
   n_quantiles: number;
 }
 
-export type ColorMode = "speed" | "altitude" | "flight" | "drone" | "accel";
+// "altitude" = Hoehe ueber MSL (faerbt nach alt); "altitude_gnd" = Hoehe ueber
+// Grund (faerbt nach above_terrain, nur mit Terrain verfuegbar).
+export type ColorMode =
+  | "speed"
+  | "altitude"
+  | "altitude_gnd"
+  | "flight"
+  | "drone"
+  | "accel";
 
 export interface TrackPoints {
   lat: number[];
