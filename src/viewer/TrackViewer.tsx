@@ -28,7 +28,7 @@ import {
   quantileLinearPositions,
   type Rgba,
 } from "./colorMap";
-import { computeAcceleration3D, robustSymmetricScale } from "./kinematics";
+import { computeAcceleration3D, computeEnergyRate, robustSymmetricScale } from "./kinematics";
 import { colorScaleFor } from "./colorScale";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
@@ -123,25 +123,33 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     return quantileLinearPositions(values, breaks);
   }, [track, trackColorMode]);
 
-  // 3D-Beschleunigung pro Punkt (m/s²) + robuste, symmetrische Skala. Daraus
-  // accelNorm ∈ [−1,1] fuer die viridis/magma-Farbgebung. Reine Track-Ableitung,
-  // daher auf [track] memoisiert (wie rankPositions).
-  const { accel, accelNorm } = useMemo(() => {
-    const a = computeAcceleration3D(track.points);
-    const scale = robustSymmetricScale(a);
-    const norm = a.map((v) =>
+  // Vorzeichenbehafteter Kanal — je nach Modus 3D-Beschleunigung (m/s²) ODER
+  // Energieaenderung dH/dt (m/s). Robuste symmetrische Skala → signedNorm ∈
+  // [−1,1] fuer die YlOrRd/YlGnBu-Farbgebung; signedRaw + signedUnit fuer den
+  // Tooltip. Nur in den signierten Modi berechnet (sonst null).
+  const { signedRaw, signedNorm, signedUnit } = useMemo(() => {
+    const raw =
+      colorMode === "accel"
+        ? computeAcceleration3D(track.points)
+        : colorMode === "energy_rate"
+          ? computeEnergyRate(track.points)
+          : null;
+    if (!raw) return { signedRaw: null, signedNorm: null, signedUnit: "" };
+    const scale = robustSymmetricScale(raw);
+    const norm = raw.map((v) =>
       v === null ? null : Math.max(-1, Math.min(1, v / scale)),
     );
-    return { accel: a, accelNorm: norm };
-  }, [track]);
+    return { signedRaw: raw, signedNorm: norm, signedUnit: colorMode === "accel" ? "m/s²" : "m/s" };
+  }, [track, colorMode]);
 
   const curtainSegments = useMemo(
-    () => buildCurtainSegments(track, dem, rankPositions, altBase, zScale, accelNorm, zOffset),
-    [track, dem, rankPositions, altBase, zScale, accelNorm, zOffset],
+    () => buildCurtainSegments(track, dem, rankPositions, altBase, zScale, signedNorm, zOffset),
+    [track, dem, rankPositions, altBase, zScale, signedNorm, zOffset],
   );
 
   // Track als individuelle, eingefaerbte Segmente. Pro Segment: Rang t (speed/
-  // altitude) und normalisierte Beschleunigung accelN (accel), je gemittelt.
+  // altitude/energy) und normalisierter Signed-Wert signedN (accel/energy_rate),
+  // je gemittelt.
   const pathSegments = useMemo(() => {
     const { lon, lat, alt } = track.points;
     const mean2 = (a: number | null, b: number | null): number => {
@@ -155,7 +163,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     const segs: {
       path: [number, number, number][];
       t: number;
-      accelN: number;
+      signedN: number;
     }[] = [];
     for (let i = 0; i < lon.length - 1; i++) {
       segs.push({
@@ -164,11 +172,11 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
           [lon[i + 1], lat[i + 1], exagAlt(alt[i + 1])],
         ],
         t: mean2(rankPositions[i], rankPositions[i + 1]),
-        accelN: mean2(accelNorm[i], accelNorm[i + 1]),
+        signedN: signedNorm ? mean2(signedNorm[i], signedNorm[i + 1]) : NaN,
       });
     }
     return segs;
-  }, [track, rankPositions, accelNorm, exagAlt]);
+  }, [track, rankPositions, signedNorm, exagAlt]);
 
   const layers = useMemo(() => {
     const result = [];
@@ -184,15 +192,15 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
     if (showCurtain) result.push(makeCurtainLayer(curtainSegments, colorMode));
 
     result.push(
-      new PathLayer<{ path: [number, number, number][]; t: number; accelN: number }>({
+      new PathLayer<{ path: [number, number, number][]; t: number; signedN: number }>({
         id: "track-path",
         data: pathSegments,
         getPath: (d) => d.path,
         getColor: (d) =>
-          colorMode === "accel"
-            ? Number.isNaN(d.accelN)
+          colorMode === "accel" || colorMode === "energy_rate"
+            ? Number.isNaN(d.signedN)
               ? FALLBACK
-              : accelerationColor(d.accelN, 255)
+              : accelerationColor(d.signedN, 255)
             : Number.isNaN(d.t)
               ? FALLBACK
               : plasmaColor(d.t, 255),
@@ -276,16 +284,18 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
       const speed = track.points.speed_kmh[idx] ?? null;
       const alt = track.points.alt[idx] ?? null;
       const above = track.points.above_terrain[idx] ?? null;
-      const a = accel[idx] ?? null;
+      const sr = signedRaw ? (signedRaw[idx] ?? null) : null;
 
       const lines: string[] = [];
       if (ts) lines.push(formatTimestamp(ts));
       lines.push(formatSpeed(speed));
       lines.push(`MSL ${formatAltitude(alt)}`);
       if (above !== null) lines.push(`üG ${Math.round(above)} m`);
-      if (a !== null && Number.isFinite(a)) {
-        // 3D-Tangentialbeschleunigung; Vorzeichen: + schneller, − langsamer.
-        lines.push(`Beschl. ${a >= 0 ? "+" : "−"}${Math.abs(a).toFixed(1)} m/s²`);
+      if (sr !== null && Number.isFinite(sr)) {
+        // Aktiver Signed-Modus: Beschl. (m/s², + schneller) bzw. ΔEnergie
+        // (m/s, + Energiegewinn).
+        const lbl = colorMode === "accel" ? "Beschl." : "ΔEnergie";
+        lines.push(`${lbl} ${sr >= 0 ? "+" : "−"}${Math.abs(sr).toFixed(1)} ${signedUnit}`);
       }
 
       return {
@@ -301,7 +311,7 @@ export function TrackViewer({ track, dem, colorMode, showCurtain, zScale, zOffse
         },
       };
     },
-    [track, accel],
+    [track, signedRaw, signedUnit, colorMode],
   );
 
   // Cursor auf die Karten-Hoehe zurueckprojizieren (statt z=0) — sonst springt

@@ -30,8 +30,11 @@ const t = {
   speed: "Tempo",
   altitude: "Höhe (MSL)",
   altitudeGnd: "Höhe (GND)",
+  energy: "Energiehöhe",
   brakeLeft: "− Bremsen",
   accelRight: "Beschl. +",
+  energyLoss: "− verliert",
+  energyGain: "gewinnt +",
 };
 
 const BAR_H = 140; // Pixelhöhe des vertikalen Verlaufbalkens
@@ -121,7 +124,12 @@ export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData
   // rechnet die AGL-Quantile aus dem terrain-angereicherten Track). Identische
   // Grenzen-Quelle wie TrackViewer (colorScaleFor) → Legende passt zur Faerbung.
   const grad = useMemo(() => {
-    if (mode !== "speed" && mode !== "altitude" && mode !== "altitude_gnd") {
+    if (
+      mode !== "speed" &&
+      mode !== "altitude" &&
+      mode !== "altitude_gnd" &&
+      mode !== "energy"
+    ) {
       return null;
     }
     const { breaks } = colorScaleFor(track, mode);
@@ -130,7 +138,9 @@ export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData
         ? { title: t.speed, unit: "km/h" }
         : mode === "altitude"
           ? { title: t.altitude, unit: "m" }
-          : { title: t.altitudeGnd, unit: "m" };
+          : mode === "altitude_gnd"
+            ? { title: t.altitudeGnd, unit: "m" }
+            : { title: t.energy, unit: "m" };
     return { ...meta, breaks };
   }, [mode, track]);
 
@@ -149,14 +159,16 @@ export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData
     );
   }
 
-  // Beschleunigung: horizontaler, vorzeichenbehafteter Verlauf.
-  if (mode === "accel") {
+  // Beschleunigung / Energieaenderung: horizontaler, vorzeichenbehafteter Verlauf.
+  if (mode === "accel" || mode === "energy_rate") {
+    const [leftLbl, rightLbl] =
+      mode === "accel" ? [t.brakeLeft, t.accelRight] : [t.energyLoss, t.energyGain];
     return (
       <div style={{ ...boxStyle, width: 168 }}>
         <div style={{ height: 9, borderRadius: 2, background: accelGradientCss() }} />
         <div style={accelLabelRowStyle}>
-          <span>{t.brakeLeft}</span>
-          <span>{t.accelRight}</span>
+          <span>{leftLbl}</span>
+          <span>{rightLbl}</span>
         </div>
       </div>
     );

@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeAcceleration3D,
+  computeEnergyRate,
+  energyHeight,
   robustSymmetricScale,
   speed3D,
   type KinematicPoints,
 } from "./kinematics";
+
+const G = 9.80665;
 
 // Hilfsbau: gleichmaessige 1-Sekunden-Schritte ab t0.
 function pts(
@@ -90,5 +94,30 @@ describe("robustSymmetricScale", () => {
 
   it("faellt bei leerer Eingabe auf 1 zurueck", () => {
     expect(robustSymmetricScale([null, null])).toBe(1);
+  });
+});
+
+describe("energyHeight", () => {
+  it("ist H = h + v3D²/(2g)", () => {
+    // 36 km/h = 10 m/s, flach (v_z=0), h=100 → H = 100 + 100/(2g).
+    const H = energyHeight(pts([36, 36, 36], [100, 100, 100]));
+    const expected = 100 + (10 * 10) / (2 * G);
+    for (const h of H) expect(h).toBeCloseTo(expected, 4);
+  });
+
+  it("liefert null ohne Geschwindigkeit", () => {
+    expect(energyHeight(pts([null, 36], [100, 100]))[0]).toBeNull();
+  });
+});
+
+describe("computeEnergyRate", () => {
+  it("ist ~0 bei konstanter Energie (Tempo + Hoehe konstant)", () => {
+    const r = computeEnergyRate(pts([36, 36, 36, 36], [100, 100, 100, 100]));
+    for (const x of r) expect(x ?? 0).toBeCloseTo(0, 6);
+  });
+
+  it("ist positiv, wenn bei gleicher Hoehe beschleunigt wird (Energiegewinn)", () => {
+    const r = computeEnergyRate(pts([0, 36, 72, 108], [100, 100, 100, 100]));
+    expect(r[1]).toBeGreaterThan(0);
   });
 });

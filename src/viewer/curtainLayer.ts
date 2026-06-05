@@ -28,9 +28,9 @@ export interface CurtainSegment {
   height: number;
   /** Mittlerer Rang [0,1] des Segments (Farbgebung speed/altitude). */
   t: number;
-  /** Mittlere normalisierte Beschleunigung [−1,1] des Segments (Farbgebung
-   *  accel); NaN ohne Wert. */
-  accelN: number;
+  /** Mittlerer normalisierter Signed-Wert [−1,1] des Segments (Farbgebung
+   *  accel/energy_rate); NaN ohne Wert. */
+  signedN: number;
   /** Rohe mittlere Track-Hoehe MSL (m, ohne Z-Skalierung). */
   altMslRaw: number;
   /** Rohe mittlere Hoehe ueber Grund (m); null ohne Terrain. */
@@ -107,7 +107,7 @@ export function buildCurtainSegments(
   rankPositions: number[],
   altBase: number,
   zScale: number,
-  accelNorm: (number | null)[] | null = null,
+  signedNorm: (number | null)[] | null = null,
   zOffset = 0,
 ): CurtainSegment[] {
   const { lat, lon, alt } = track.points;
@@ -159,8 +159,8 @@ export function buildCurtainSegments(
     const altMslRaw = (altA + altB) / 2;
     const altAglRaw = terrMeanRaw !== null ? altMslRaw - terrMeanRaw : null;
 
-    const accelN = accelNorm
-      ? meanOrNaN(accelNorm[i], accelNorm[i + 1])
+    const signedN = signedNorm
+      ? meanOrNaN(signedNorm[i], signedNorm[i + 1])
       : NaN;
 
     segments.push({
@@ -172,7 +172,7 @@ export function buildCurtainSegments(
       ],
       height,
       t,
-      accelN,
+      signedN,
       altMslRaw,
       altAglRaw,
     });
@@ -184,8 +184,8 @@ export function makeCurtainLayer(segments: CurtainSegment[], colorMode: ColorMod
   const getColor = (d: CurtainSegment): Rgba => {
     if (colorMode === "flight") return flightColor(d.altMslRaw, d.altAglRaw);
     if (colorMode === "drone") return droneColor(d.altAglRaw);
-    if (colorMode === "accel")
-      return Number.isNaN(d.accelN) ? FALLBACK : accelerationColor(d.accelN, 200);
+    if (colorMode === "accel" || colorMode === "energy_rate")
+      return Number.isNaN(d.signedN) ? FALLBACK : accelerationColor(d.signedN, 200);
     return Number.isNaN(d.t) ? FALLBACK : plasmaColor(d.t, 200);
   };
 

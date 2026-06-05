@@ -64,30 +64,66 @@ export function speed3D(points: KinematicPoints): (number | null)[] {
   });
 }
 
-/**
- * Tangential-Beschleunigung (m/s²) als d(v3D)/dt: zentrale Differenz im Inneren,
- * einseitig an den Raendern. null, wenn ein benoetigter v3D-Nachbar fehlt oder
- * dt<=0. Vorzeichenbehaftet (+ beschleunigen, − bremsen).
- */
-export function computeAcceleration3D(points: KinematicPoints): (number | null)[] {
-  const v3 = speed3D(points);
-  const { timestamp_ms } = points;
-  const n = v3.length;
-  const accel = new Array<number | null>(n).fill(null);
-  if (n < 2) return accel;
+const G = 9.80665; // Normfallbeschleunigung (m/s²)
 
+/**
+ * Zeitliche Ableitung d(value)/dt: zentrale Differenz im Inneren, einseitig an
+ * den Raendern. null, wenn ein benoetigter Nachbar fehlt oder dt<=0.
+ * Vorzeichenbehaftet. Gemeinsame Basis fuer Beschleunigung und Energieaenderung.
+ */
+export function centralTimeDerivative(
+  values: (number | null)[],
+  timestampMs: number[],
+): (number | null)[] {
+  const n = values.length;
+  const out = new Array<number | null>(n).fill(null);
+  if (n < 2) return out;
   for (let i = 0; i < n; i++) {
     const lo = i === 0 ? 0 : i - 1;
     const hi = i === n - 1 ? n - 1 : i + 1;
     if (lo === hi) continue;
-    const a = v3[lo];
-    const b = v3[hi];
+    const a = values[lo];
+    const b = values[hi];
     if (a === null || b === null) continue;
-    const dt = dtSeconds(timestamp_ms, lo, hi);
+    const dt = dtSeconds(timestampMs, lo, hi);
     if (dt === null) continue;
-    accel[i] = (b - a) / dt;
+    out[i] = (b - a) / dt;
   }
-  return accel;
+  return out;
+}
+
+/**
+ * Tangential-Beschleunigung (m/s²) = d(v3D)/dt. Vorzeichenbehaftet
+ * (+ beschleunigen, − bremsen).
+ */
+export function computeAcceleration3D(points: KinematicPoints): (number | null)[] {
+  return centralTimeDerivative(speed3D(points), points.timestamp_ms);
+}
+
+/**
+ * Spezifische Energiehoehe H = h + v3D²/(2g) (m) — "Energiealtitude": die Hoehe,
+ * auf die der Flugkoerper stiege, wuerde er seine kinetische Energie vollstaendig
+ * in Hoehe umsetzen. Massenunabhaengig. h = MSL-Hoehe, v3D = 3D-Geschwindigkeit.
+ * null, wo Hoehe ODER Geschwindigkeit fehlt (sonst waere die Gesamtenergie
+ * unvollstaendig).
+ */
+export function energyHeight(points: KinematicPoints): (number | null)[] {
+  const v3 = speed3D(points);
+  return points.alt.map((h, i) => {
+    if (h === null || !Number.isFinite(h)) return null;
+    const v = v3[i];
+    if (v === null) return null;
+    return h + (v * v) / (2 * G);
+  });
+}
+
+/**
+ * Energieaenderungsrate dH/dt (m/s) — in der Luftfahrt die "spezifische
+ * Ueberschussleistung" Ps. Vorzeichenbehaftet (+ Energie gewinnen, − verlieren).
+ * Kunstflug-Kennzahl.
+ */
+export function computeEnergyRate(points: KinematicPoints): (number | null)[] {
+  return centralTimeDerivative(energyHeight(points), points.timestamp_ms);
 }
 
 /**

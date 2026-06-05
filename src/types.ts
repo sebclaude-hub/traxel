@@ -43,13 +43,17 @@ export interface QuantileBreaks {
 
 // "altitude" = Hoehe ueber MSL (faerbt nach alt); "altitude_gnd" = Hoehe ueber
 // Grund (faerbt nach above_terrain, nur mit Terrain verfuegbar).
+// "energy" = spezifische Energiehoehe H = h + v²/(2g) (vorzeichenlos);
+// "energy_rate" = dH/dt (vorzeichenbehaftet, wie accel gefaerbt).
 export type ColorMode =
   | "speed"
   | "altitude"
   | "altitude_gnd"
   | "flight"
   | "drone"
-  | "accel";
+  | "accel"
+  | "energy"
+  | "energy_rate";
 
 export interface TrackPoints {
   lat: number[];

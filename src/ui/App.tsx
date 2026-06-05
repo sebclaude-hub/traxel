@@ -461,11 +461,15 @@ export default function App() {
         ["flight", "Flug"],
         ["drone", "Drohne"],
         ["accel", "Beschl."],
+        ["energy", "Energie"],
+        ["energy_rate", "ΔEnergie"],
       ]
     : [
         ["speed", "Geschwindigkeit"],
         ["altitude", "Höhe MSL"],
         ["accel", "Beschl."],
+        ["energy", "Energie"],
+        ["energy_rate", "ΔEnergie"],
       ];
 
   return (
@@ -788,7 +792,7 @@ function Segmented<T extends string | boolean>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div style={{ display: "flex", gap: 4 }}>
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
       {options.map(([v, label]) => (
         <button
           key={String(v)}

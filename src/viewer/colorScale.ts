@@ -12,6 +12,7 @@
 
 import type { ColorMode, TrackData } from "../types";
 import { computeQuantileBreaks } from "../pipeline/processing/quantiles";
+import { energyHeight } from "./kinematics";
 
 export interface ColorScale {
   /** Rohwerte pro Punkt fuer den Modus (null → spaeter FALLBACK-Farbe). */
@@ -26,6 +27,12 @@ export function colorScaleFor(track: TrackData, mode: ColorMode): ColorScale {
   }
   if (mode === "altitude_gnd") {
     const values = track.points.above_terrain;
+    return { values, breaks: computeQuantileBreaks(values).breaks };
+  }
+  if (mode === "energy") {
+    // Vorzeichenlose Energiehoehe → wie Hoehe/Tempo quantil-entzerrt. Werte werden
+    // viewer-seitig gerechnet, daher auch die Grenzen on-the-fly.
+    const values = energyHeight(track.points);
     return { values, breaks: computeQuantileBreaks(values).breaks };
   }
   // speed (Default; flight/drone/accel werden vom Aufrufer separat behandelt
