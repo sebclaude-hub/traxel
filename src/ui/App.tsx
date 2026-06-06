@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
 import { applyCuts, type CutMode, type CutSpec } from "../pipeline";
-import { enrichTrackWithTerrain } from "../pipeline/terrain";
+import { enrichTrackWithTerrain, suggestDemOffset } from "../pipeline/terrain";
 import type { SatelliteImage } from "../pipeline/terrain/satellite";
 import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
@@ -471,6 +471,28 @@ export default function App() {
     [displayTrack, activeDem, zOffset],
   );
 
+  // Vorgeschlagener DEM-Z-Offset (Boden: Track so tief wie moeglich ohne
+  // Pokethrough; Flug: 0). Aus dem ROHEN DEM berechnet (ohne aktuellen
+  // Offset), daher haengt es nicht an zOffset → keine Rueckkopplung.
+  const suggestedOffset = useMemo(
+    () => (displayTrack && activeDem ? suggestDemOffset(displayTrack, activeDem) : 0),
+    [displayTrack, activeDem],
+  );
+
+  // Auto-Offset einmal pro Track anwenden, sobald das Terrain geladen ist.
+  // Flug-Tracks schlagen 0 vor (bleiben unveraendert). Spaetere Aenderungen
+  // (Detailstufe, manuelles Nachjustieren) ueberschreibt es nicht.
+  const pendingAutoOffset = useRef(true);
+  useEffect(() => {
+    pendingAutoOffset.current = true;
+  }, [track]);
+  useEffect(() => {
+    if (pendingAutoOffset.current && displayTrack && activeDem) {
+      pendingAutoOffset.current = false;
+      setZOffset(suggestedOffset);
+    }
+  }, [displayTrack, activeDem, suggestedOffset]);
+
   // activeIdx auf die (ggf. durch Cuts verkuerzte) Laenge begrenzen.
   const safeIdx = viewTrack
     ? Math.min(activeIdx, Math.max(0, viewTrack.meta.n_points - 1))
@@ -632,12 +654,34 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <LabeledNum
-                label="Höhe ±m"
-                value={zOffset}
-                step={5}
-                onChange={setZOffset}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <LabeledNum
+                  label="DEM ±m"
+                  value={zOffset}
+                  step={5}
+                  onChange={setZOffset}
+                />
+                <button
+                  style={btnStyle}
+                  disabled={!activeDem}
+                  title={
+                    activeDem
+                      ? `Auto-Offset anwenden (${suggestedOffset.toFixed(1)} m). `
+                        + "Boden: Track so tief wie moeglich; Flug: 0."
+                      : "Terrain noch nicht geladen"
+                  }
+                  onClick={() => setZOffset(suggestedOffset)}
+                >
+                  Auto
+                </button>
+                <button
+                  style={btnStyle}
+                  title="Kein Offset – DEM bei Originalhoehe"
+                  onClick={() => setZOffset(0)}
+                >
+                  0
+                </button>
+              </div>
 
               {/* Cut-Werkzeug: Bereich (Original-Indizes) + Modus → Schneiden. */}
               {track && (

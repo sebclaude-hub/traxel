@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DemGrid, TrackData } from "../../types";
-import { enrichTrackWithTerrain } from "./enrich-terrain";
+import { enrichTrackWithTerrain, suggestDemOffset } from "./enrich-terrain";
 
 /** Flaches Terrain auf 100 m ueber [0,1]×[0,1]. */
 const FLAT_100: DemGrid = {
@@ -92,5 +92,57 @@ describe("enrichTrackWithTerrain", () => {
     enrichTrackWithTerrain(track, FLAT_100);
     expect(track.points.terrain_elev).toEqual([null]);
     expect(track.meta.has_terrain).toBe(false);
+  });
+});
+
+describe("suggestDemOffset", () => {
+  it("Boden-Track: hebt das DEM bis knapp unter den tiefsten Punkt", () => {
+    // Terrain 100, Track durchgaengig 50 m darueber → Offset 50 (AGL → 0).
+    const track = makeTrack([
+      { lon: 0.3, lat: 0.5, alt: 150 },
+      { lon: 0.5, lat: 0.5, alt: 150 },
+      { lon: 0.7, lat: 0.5, alt: 150 },
+    ]);
+    expect(suggestDemOffset(track, FLAT_100)).toBeCloseTo(50, 5);
+  });
+
+  it("Boden-Track: angewandter Offset setzt den tiefsten Punkt ~auf den Boden", () => {
+    const track = makeTrack([
+      { lon: 0.3, lat: 0.5, alt: 146 },
+      { lon: 0.5, lat: 0.5, alt: 150 },
+      { lon: 0.7, lat: 0.5, alt: 160 },
+    ]);
+    const off = suggestDemOffset(track, FLAT_100);
+    const enriched = enrichTrackWithTerrain(track, FLAT_100, off);
+    const agl = enriched.points.above_terrain.filter((v): v is number => v !== null);
+    // Tiefster Punkt sitzt praktisch auf dem Boden. Das kleine Perzentil (statt
+    // striktem Minimum) darf den absolut tiefsten Punkt minimal unterschreiten.
+    expect(Math.min(...agl)).toBeGreaterThan(-1);
+    expect(Math.min(...agl)).toBeLessThan(1);
+  });
+
+  it("Flug-Track: schlaegt 0 vor (kein Bodenbezug)", () => {
+    const track = makeTrack([
+      { lon: 0.3, lat: 0.5, alt: 250 },
+      { lon: 0.5, lat: 0.5, alt: 250 },
+      { lon: 0.7, lat: 0.5, alt: 250 },
+    ]);
+    expect(suggestDemOffset(track, FLAT_100)).toBe(0);
+  });
+
+  it("ignoriert einzelne Ausreisser (GPS-Hoehen-Aussetzer)", () => {
+    // 100 saubere Bodenpunkte (Offset 50) + 1 Aussetzer 200 m unter Terrain.
+    const pts = Array.from({ length: 100 }, () => ({ lon: 0.5, lat: 0.5, alt: 150 }));
+    pts.push({ lon: 0.5, lat: 0.5, alt: -100 }); // diff −200
+    const off = suggestDemOffset(makeTrack(pts), FLAT_100);
+    expect(off).toBeCloseTo(50, 5); // nicht −200
+  });
+
+  it("ohne DEM-Treffer: 0", () => {
+    const track = makeTrack([
+      { lon: 5, lat: 5, alt: 150 },
+      { lon: 6, lat: 6, alt: 150 },
+    ]);
+    expect(suggestDemOffset(track, FLAT_100)).toBe(0);
   });
 });
