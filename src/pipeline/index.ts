@@ -8,6 +8,7 @@
 
 import type { SatelliteData, TrackData } from "../types";
 import { parseGpx } from "./parsing/gpx";
+import { parseIgc } from "./parsing/igc";
 import { parseKml } from "./parsing/kml";
 import { buildSatelliteData } from "./parsing/nmea-gsv";
 import { messagesToTrack, parseNmeaMessages } from "./parsing/nmea";
@@ -48,6 +49,19 @@ export function processKml(xml: string, name: string): TrackData {
   const raw = parseKml(xml);
   const enriched = enrichSpeed(raw);
   return buildTrackData(enriched, { name, sourceType: "kml" });
+}
+
+/**
+ * Volle IGC-Pipeline: B-Records parsen → Schema B → anreichern → TrackData.
+ * IGC liefert keine Geschwindigkeit; enrichSpeed fuellt sie geodaetisch auf.
+ *
+ * @param text IGC-Inhalt (Logger-Textdatei).
+ * @param name Anzeigename des Tracks im Viewer.
+ */
+export function processIgc(text: string, name: string): TrackData {
+  const raw = parseIgc(text);
+  const enriched = enrichSpeed(raw);
+  return buildTrackData(enriched, { name, sourceType: "igc" });
 }
 
 /**

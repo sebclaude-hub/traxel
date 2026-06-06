@@ -19,7 +19,7 @@ export interface TrackBounds {
 
 export interface TrackMeta {
   name: string;
-  source_type: "nmea" | "gpx" | "kml";
+  source_type: "nmea" | "gpx" | "kml" | "igc";
   n_points: number;
   total_distance_m: number;
   duration_s: number;

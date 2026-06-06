@@ -10,7 +10,7 @@
 // Terrain nutzt fetch/createImageBitmap/OffscreenCanvas.
 // ---------------------------------------------------------------------------
 
-import { processGpx, processKml, processNmea } from "../pipeline";
+import { processGpx, processIgc, processKml, processNmea } from "../pipeline";
 import { buildTerrain } from "../pipeline/terrain";
 import { buildSatelliteImage, type SatBounds } from "../pipeline/terrain/satellite";
 import type { DemGrid, SatelliteData, TrackBounds, TrackData } from "../types";
@@ -25,6 +25,7 @@ export type PipelineRequest =
   | { id: number; kind: "gpx"; text: string; name: string }
   | { id: number; kind: "kml"; text: string; name: string }
   | { id: number; kind: "nmea"; text: string; name: string }
+  | { id: number; kind: "igc"; text: string; name: string }
   | { id: number; kind: "terrain"; bounds: TrackBounds; opts?: TerrainOpts }
   | { id: number; kind: "satellite"; bounds: TrackBounds };
 
@@ -32,6 +33,7 @@ export type PipelineResponse =
   | { id: number; ok: true; kind: "gpx"; track: TrackData }
   | { id: number; ok: true; kind: "kml"; track: TrackData }
   | { id: number; ok: true; kind: "nmea"; track: TrackData; satellites: SatelliteData | null }
+  | { id: number; ok: true; kind: "igc"; track: TrackData }
   | { id: number; ok: true; kind: "terrain"; dem: DemGrid }
   | { id: number; ok: true; kind: "satellite"; image: ImageBitmap; bounds: SatBounds }
   | { id: number; ok: false; error: string };
@@ -49,6 +51,9 @@ self.onmessage = async (e: MessageEvent<PipelineRequest>) => {
         break;
       case "kml":
         post({ id: req.id, ok: true, kind: "kml", track: processKml(req.text, req.name) });
+        break;
+      case "igc":
+        post({ id: req.id, ok: true, kind: "igc", track: processIgc(req.text, req.name) });
         break;
       case "nmea": {
         const { track, satellites } = processNmea(req.text, req.name);

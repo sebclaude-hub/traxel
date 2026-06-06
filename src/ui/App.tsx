@@ -612,7 +612,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".gpx,.kml,.nmea,.log,.txt,.png,application/gpx+xml,application/vnd.google-earth.kml+xml,text/xml,image/png"
+        accept=".gpx,.kml,.igc,.nmea,.log,.txt,.png,application/gpx+xml,application/vnd.google-earth.kml+xml,text/xml,image/png"
         style={{ display: "none" }}
         onChange={onInputChange}
       />
@@ -947,7 +947,7 @@ function DropPrompt({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>Traxel</div>
         <div style={{ color: "#aaa", fontSize: 14, marginBottom: 20 }}>
-          GPX-, KML- oder NMEA-Datei hierher ziehen
+          GPX-, KML-, IGC- oder NMEA-Datei hierher ziehen
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
           <button style={btnPrimaryStyle} onClick={onPick}>

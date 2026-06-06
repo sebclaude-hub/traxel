@@ -39,7 +39,7 @@ export interface TrackRecord {
   /** Anzeigename (= td.meta.name, Datei-Basename). */
   name: string;
   /** Quellformat (= td.meta.source_type). */
-  format: "gpx" | "kml" | "nmea";
+  format: "gpx" | "kml" | "nmea" | "igc";
   /** Achsenparallele Huelle des Tracks (= td.meta.bounds). */
   bbox: TrackBounds;
   timestampStartUtc: string | null;

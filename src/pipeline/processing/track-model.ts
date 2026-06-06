@@ -21,7 +21,7 @@ import { computeQuantileBreaks } from "./quantiles";
 
 export interface BuildTrackDataOptions {
   name: string;
-  sourceType: "nmea" | "gpx" | "kml";
+  sourceType: "nmea" | "gpx" | "kml" | "igc";
   nQuantiles?: number;
 }
 

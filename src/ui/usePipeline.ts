@@ -82,14 +82,16 @@ export function usePipeline() {
       const kind =
         ext === "kml"
           ? "kml"
-          : ext === "nmea" || ext === "log" || ext === "txt"
-            ? "nmea"
-            : "gpx";
+          : ext === "igc"
+            ? "igc"
+            : ext === "nmea" || ext === "log" || ext === "txt"
+              ? "nmea"
+              : "gpx";
       const res = await post({ kind, text, name });
       if (res.ok && res.kind === "nmea") {
         return { track: res.track, satellites: res.satellites };
       }
-      if (res.ok && (res.kind === "gpx" || res.kind === "kml")) {
+      if (res.ok && (res.kind === "gpx" || res.kind === "kml" || res.kind === "igc")) {
         return { track: res.track, satellites: null };
       }
       throw new Error("Unerwartete Antwort fuer Track-Anfrage");
