@@ -3,13 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   computeAcceleration3D,
   computeEnergyRate,
+  decomposeAcceleration,
   energyHeight,
   robustSymmetricScale,
   speed3D,
+  type GeoKinematicPoints,
   type KinematicPoints,
 } from "./kinematics";
 
 const G = 9.80665;
+const M_PER_DEG = 111320;
 
 // Hilfsbau: gleichmaessige 1-Sekunden-Schritte ab t0.
 function pts(
@@ -119,5 +122,79 @@ describe("computeEnergyRate", () => {
   it("ist positiv, wenn bei gleicher Hoehe beschleunigt wird (Energiegewinn)", () => {
     const r = computeEnergyRate(pts([0, 36, 72, 108], [100, 100, 100, 100]));
     expect(r[1]).toBeGreaterThan(0);
+  });
+});
+
+describe("decomposeAcceleration", () => {
+  // Baut Punkte am Aequator (cos(lat0)=1 → 1° ≈ M_PER_DEG m in beide Richtungen),
+  // sodass east=lon*M, north=lat*M. dt = 1 s.
+  function geo(
+    xy: [number, number][], // (Ost, Nord) in Metern
+    alt: (number | null)[],
+  ): GeoKinematicPoints {
+    return {
+      lon: xy.map(([e]) => e / M_PER_DEG),
+      lat: xy.map(([, nth]) => nth / M_PER_DEG),
+      alt,
+      timestamp_ms: xy.map((_p, i) => 1_000_000 + i * 1000),
+    };
+  }
+
+  it("liefert ~0 bei gleichfoermiger Geradeausfahrt", () => {
+    const xy: [number, number][] = Array.from({ length: 9 }, (_v, k) => [10 * k, 0]);
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)))[4]!;
+    expect(d).not.toBeNull();
+    expect(Math.abs(d.long)).toBeLessThan(0.02);
+    expect(Math.abs(d.lateral)).toBeLessThan(0.02);
+    expect(Math.abs(d.vertical)).toBeLessThan(0.02);
+  });
+
+  it("misst die Querbeschleunigung v²/r einer Linkskurve (+ = links)", () => {
+    const r = 100;
+    const omega = 0.05; // rad/s → v = omega*r = 5 m/s, a_zentripetal = v²/r = 0.25
+    const xy: [number, number][] = Array.from({ length: 60 }, (_v, k) => {
+      const th = omega * k; // CCW → Linkskurve
+      return [r * Math.cos(th), r * Math.sin(th)];
+    });
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)))[30]!;
+    expect(d).not.toBeNull();
+    expect(d.lateral).toBeCloseTo(0.25, 2); // + = links (CCW)
+    expect(Math.abs(d.long)).toBeLessThan(0.02);
+    expect(Math.abs(d.vertical)).toBeLessThan(0.02);
+  });
+
+  it("dreht das Vorzeichen der Querbeschleunigung bei Rechtskurve", () => {
+    const r = 100;
+    const omega = 0.05;
+    const xy: [number, number][] = Array.from({ length: 60 }, (_v, k) => {
+      const th = -omega * k; // CW → Rechtskurve
+      return [r * Math.cos(th), r * Math.sin(th)];
+    });
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)))[30]!;
+    expect(d.lateral).toBeCloseTo(-0.25, 2);
+  });
+
+  it("misst Laengsbeschleunigung beim Beschleunigen geradeaus", () => {
+    // x = 0.5*a*t², a = 2 m/s² → mittiger Punkt long ≈ 2.
+    const xy: [number, number][] = Array.from({ length: 9 }, (_v, k) => [k * k, 0]);
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)))[4]!;
+    expect(d.long).toBeCloseTo(2, 5);
+    expect(Math.abs(d.lateral)).toBeLessThan(0.02);
+  });
+
+  it("misst Vertikalbeschleunigung bei konstanter Horizontalfahrt", () => {
+    // Ost mit 10 m/s konstant; alt = 0.5*3*t² → vertikal ≈ 3, long ≈ 0.
+    const xy: [number, number][] = Array.from({ length: 9 }, (_v, k) => [10 * k, 0]);
+    const alt = xy.map((_p, k) => 1.5 * k * k);
+    const d = decomposeAcceleration(geo(xy, alt))[4]!;
+    expect(d.vertical).toBeCloseTo(3, 5);
+    expect(Math.abs(d.long)).toBeLessThan(0.02);
+    expect(Math.abs(d.lateral)).toBeLessThan(0.02);
+  });
+
+  it("liefert null bei Stillstand (Richtung unbestimmt)", () => {
+    const xy: [number, number][] = Array.from({ length: 5 }, () => [0, 0]);
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)));
+    expect(d[2]).toBeNull();
   });
 });

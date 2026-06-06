@@ -12,6 +12,7 @@ import type { SatelliteImage } from "../pipeline/terrain/satellite";
 import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
 import { combinedBreaks } from "../viewer/colorScale";
+import { decomposeAcceleration, type AccelDecomp } from "../viewer/kinematics";
 import { cornersToBounds, unionBounds } from "../library/spatial";
 import {
   getChartRecord,
@@ -102,6 +103,12 @@ export default function App() {
 
   const [colorMode, setColorMode] = useState<ColorMode>("speed");
   const [showCurtain, setShowCurtain] = useState(true);
+  // G-Vektor: 3D-Beschleunigungspfeile (laengs/quer/vertikal) am aktiven Punkt.
+  const [showAccel, setShowAccel] = useState(false);
+  // Wiedergabe: zaehlt den aktiven Punkt automatisch hoch (Anzeigedauer pro
+  // Punkt, NICHT die echte Track-Zeit).
+  const [playing, setPlaying] = useState(false);
+  const [playSpeedMs, setPlaySpeedMs] = useState(250);
   // Konstanter Hoehen-Versatz (m) zum Absenken/Anheben des Tracks relativ zum
   // Terrain (z.B. Ellipsoid-vs-Geoid). Reine Darstellung; bleibt ueber Importe.
   const [zOffset, setZOffset] = useState(0);
@@ -119,6 +126,7 @@ export default function App() {
   const [activeIdx, setActiveIdx] = useState(0);
   useEffect(() => {
     setActiveIdx(0);
+    setPlaying(false); // Wiedergabe bei Trackwechsel stoppen
   }, [track]);
 
   // Cuts (gegen die Original-Track-Indizes) + Formularzustand.
@@ -535,6 +543,25 @@ export default function App() {
     [viewTrack, viewCompareTrack],
   );
 
+  // Beschleunigungs-Zerlegung des primaeren Tracks (nur im G-Vektor-Modus —
+  // ist die 2. Ableitung, also nicht umsonst rechnen). Speist Pfeile + Readout.
+  const accelDecomp = useMemo(
+    () => (showAccel && viewTrack ? decomposeAcceleration(viewTrack.points) : null),
+    [showAccel, viewTrack],
+  );
+
+  // Wiedergabe: aktiven Punkt im gewaehlten Takt hochzaehlen (mit Schleife).
+  // Laenge aus dem angezeigten (ggf. geschnittenen) Track.
+  const nDisplayPoints = viewTrack?.meta.n_points ?? 0;
+  useEffect(() => {
+    if (!playing || nDisplayPoints <= 1) return;
+    const id = setInterval(
+      () => setActiveIdx((i) => (i + 1) % nDisplayPoints),
+      playSpeedMs,
+    );
+    return () => clearInterval(id);
+  }, [playing, playSpeedMs, nDisplayPoints]);
+
   // Vorgeschlagener DEM-Z-Offset (Boden: Track so tief wie moeglich ohne
   // Pokethrough; Flug: 0). Aus dem ROHEN DEM berechnet (ohne aktuellen
   // Offset), daher haengt es nicht an zOffset → keine Rueckkopplung.
@@ -701,6 +728,9 @@ export default function App() {
               satelliteImage={terrainView === "sat" ? satelliteImage : null}
               charts={placedCharts}
               editChart={editChart}
+              accelDecomp={accelDecomp}
+              activeIdx={safeIdx}
+              showAccelArrows={showAccel}
             />
             <div style={togglesStyle}>
               <Segmented<ColorMode>
@@ -716,6 +746,14 @@ export default function App() {
                   [false, "aus"],
                 ]}
                 onChange={setShowCurtain}
+              />
+              <Segmented<boolean>
+                value={showAccel}
+                options={[
+                  [true, "G-Vektor"],
+                  [false, "aus"],
+                ]}
+                onChange={setShowAccel}
               />
               {dem && (
                 <Segmented<TerrainView>
@@ -874,21 +912,46 @@ export default function App() {
         )}
         </div>
 
-        {viewTrack && displaySatellites && (
+        {viewTrack && (displaySatellites || (showAccel && accelDecomp)) && (
           <div style={sidePanelStyle}>
-            <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
-              Satellitenkonstellation
-            </div>
-            <SkyPlot satData={displaySatellites} trackIdx={safeIdx} />
-            <div style={{ color: "#556", fontSize: 10, marginTop: 6 }}>
-              {displaySatellites.talkers.join(" / ")}
-            </div>
+            {displaySatellites && (
+              <>
+                <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
+                  Satellitenkonstellation
+                </div>
+                <SkyPlot satData={displaySatellites} trackIdx={safeIdx} />
+                <div style={{ color: "#556", fontSize: 10, marginTop: 6 }}>
+                  {displaySatellites.talkers.join(" / ")}
+                </div>
+              </>
+            )}
+            {showAccel && accelDecomp && (
+              <AccelReadout decomp={accelDecomp[safeIdx] ?? null} />
+            )}
           </div>
         )}
       </div>
 
-      {viewTrack && displaySatellites && (
+      {viewTrack && (displaySatellites || showAccel) && (
         <div style={sliderStyle}>
+          <button
+            style={btnStyle}
+            onClick={() => setPlaying((p) => !p)}
+            title={playing ? "Pause" : "Abspielen (Punkte durchlaufen)"}
+          >
+            {playing ? "⏸" : "▶"}
+          </button>
+          <div style={{ display: "flex", gap: 4 }} title="Anzeigedauer pro Punkt">
+            {[50, 100, 250, 500].map((ms) => (
+              <button
+                key={ms}
+                style={ms === playSpeedMs ? btnActiveStyle : btnStyle}
+                onClick={() => setPlaySpeedMs(ms)}
+              >
+                {ms}ms
+              </button>
+            ))}
+          </div>
           <input
             type="range"
             min={0}
@@ -966,6 +1029,49 @@ function DropPrompt({
           <div style={{ color: "#f88", fontSize: 13, marginTop: 16 }}>{error}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Zahlen-Readout der Beschleunigungs-Zerlegung am aktiven Punkt. Farben passend
+// zu den Pfeilen (laengs=gruen, quer=orange, vertikal=blau).
+function AccelReadout({ decomp }: { decomp: AccelDecomp | null }) {
+  const sgn = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+  const row = (label: string, value: number, color: string) => (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+      <span style={{ color }}>{label}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{sgn(value)}</span>
+    </div>
+  );
+  return (
+    <div style={{ width: "100%", marginTop: 8 }}>
+      <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
+        Beschleunigung · m/s²
+      </div>
+      {decomp ? (
+        <>
+          {row("längs", decomp.long, "#50d278")}
+          {row("quer", decomp.lateral, "#f09628")}
+          {row("vertikal", decomp.vertical, "#5096f0")}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 12,
+              borderTop: "1px solid #2a2a2a",
+              marginTop: 4,
+              paddingTop: 4,
+            }}
+          >
+            <span>Betrag</span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>
+              {Math.hypot(decomp.long, decomp.lateral, decomp.vertical).toFixed(1)}
+            </span>
+          </div>
+        </>
+      ) : (
+        <div style={{ color: "#667", fontSize: 11 }}>— (Richtung unbestimmt)</div>
+      )}
     </div>
   );
 }

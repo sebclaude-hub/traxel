@@ -13,7 +13,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import DeckGL from "deck.gl";
 import { MapView } from "@deck.gl/core";
-import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { LineLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 
 import { sampleDem } from "../pipeline/terrain/sample";
 import type { ColorMode, DemGrid, TrackData } from "../types";
@@ -34,7 +34,12 @@ import {
   quantileLinearPositions,
   type Rgba,
 } from "./colorMap";
-import { computeAcceleration3D, computeEnergyRate, robustSymmetricScale } from "./kinematics";
+import {
+  computeAcceleration3D,
+  computeEnergyRate,
+  robustSymmetricScale,
+  type AccelDecomp,
+} from "./kinematics";
 import { colorScaleFor, combinedBreaks } from "./colorScale";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
@@ -68,6 +73,16 @@ interface Props {
   satelliteImage?: SatelliteImage | null;
   charts?: PlacedChart[];
   editChart?: EditChart | null;
+  /**
+   * Beschleunigungs-Zerlegung des PRIMAEREN Tracks (tracks[0]) pro Punkt. Wird
+   * in App berechnet (decomposeAcceleration) und sowohl fuer die Pfeile am
+   * aktiven Punkt als auch im Tooltip verwendet. null = G-Vektor-Modus aus.
+   */
+  accelDecomp?: (AccelDecomp | null)[] | null;
+  /** Aktiver Punkt (Slider/Wiedergabe) — dort werden die Pfeile gezeichnet. */
+  activeIdx?: number;
+  /** Pfeile (laengs/quer/vertikal) am aktiven Punkt anzeigen. */
+  showAccelArrows?: boolean;
 }
 
 interface DeckViewState {
@@ -79,6 +94,15 @@ interface DeckViewState {
 }
 
 const FALLBACK: Rgba = [150, 150, 150, 180];
+
+// G-Vektor-Pfeile: feste Laenge in Metern je 1 m/s² (kein Regler — die Pfeile
+// werden ohnehin erst im hineingezoomten Zustand gut sichtbar). Farben:
+// laengs=gruen, quer=orange, vertikal=blau, Aktiv-Marker weiss.
+const ARROW_M_PER_MS2 = 20;
+const COL_LONG: Rgba = [80, 210, 120, 255];
+const COL_LAT: Rgba = [240, 150, 40, 255];
+const COL_VERT: Rgba = [80, 150, 240, 255];
+const COL_ACTIVE: Rgba = [255, 255, 255, 255];
 
 // Anfangskamera ueber die Vereinigung aller Track-Bounds (zentriert beide).
 function buildInitialViewState(tracks: TrackData[]): DeckViewState {
@@ -128,6 +152,9 @@ export function TrackViewer({
   satelliteImage = null,
   charts = [],
   editChart = null,
+  accelDecomp = null,
+  activeIdx = 0,
+  showAccelArrows = false,
 }: Props) {
   // Anfangskamera nur einmal aus dem ERSTEN Track-Set ableiten. Ein spaeter
   // hinzukommender Vergleichstrack veraendert die Kamera nicht (der Nutzer
@@ -293,6 +320,80 @@ export function TrackViewer({
       );
     });
 
+    // 4b. G-Vektor: Aktiv-Marker + Komponenten-Pfeile am aktiven Punkt des
+    // primaeren Tracks. Vertikalkomponente wird mit zScale ueberhoeht wie die
+    // Szene; horizontale Pfeile bleiben in echten Metern. depthCompare 'always'
+    // → immer obenauf.
+    if (showAccelArrows && accelDecomp && tracks[0]) {
+      const tp = tracks[0].points;
+      const i = activeIdx;
+      if (i >= 0 && i < tp.lat.length) {
+        const lon = tp.lon[i];
+        const lat = tp.lat[i];
+        const z = exagAlt(tp.alt[i]);
+        result.push(
+          new ScatterplotLayer<number>({
+            id: "accel-active",
+            data: [0],
+            getPosition: () => [lon, lat, z],
+            getRadius: 7,
+            radiusUnits: "pixels",
+            getFillColor: COL_ACTIVE,
+            stroked: true,
+            getLineColor: [0, 0, 0, 255],
+            lineWidthMinPixels: 1,
+            pickable: false,
+            parameters: { depthCompare: "always" },
+            updateTriggers: { getPosition: [i, zScale, altBase, tracks] },
+          }),
+        );
+        const d = accelDecomp[i];
+        if (d) {
+          const mPerDegLon = 111320 * Math.cos((lat * Math.PI) / 180);
+          const target = (oe: number, on: number, ou: number): [number, number, number] => [
+            lon + oe / mPerDegLon,
+            lat + on / 111320,
+            z + ou * zScale,
+          ];
+          const he = d.headingE;
+          const hn = d.headingN;
+          const S = ARROW_M_PER_MS2;
+          const arrows = [
+            { color: COL_LONG, target: target(d.long * S * he, d.long * S * hn, 0) },
+            { color: COL_LAT, target: target(d.lateral * S * -hn, d.lateral * S * he, 0) },
+            { color: COL_VERT, target: target(0, 0, d.vertical * S) },
+          ];
+          result.push(
+            new LineLayer<{ color: Rgba; target: [number, number, number] }>({
+              id: "accel-arrows",
+              data: arrows,
+              getSourcePosition: () => [lon, lat, z],
+              getTargetPosition: (a) => a.target,
+              getColor: (a) => a.color,
+              getWidth: 3,
+              widthUnits: "pixels",
+              pickable: false,
+              parameters: { depthCompare: "always" },
+              updateTriggers: { getSourcePosition: [i, zScale, altBase], getTargetPosition: [i, zScale, accelDecomp] },
+            }),
+          );
+          result.push(
+            new ScatterplotLayer<{ color: Rgba; target: [number, number, number] }>({
+              id: "accel-tips",
+              data: arrows,
+              getPosition: (a) => a.target,
+              getRadius: 4,
+              radiusUnits: "pixels",
+              getFillColor: (a) => a.color,
+              pickable: false,
+              parameters: { depthCompare: "always" },
+              updateTriggers: { getPosition: [i, zScale, accelDecomp] },
+            }),
+          );
+        }
+      }
+    }
+
     // 5. Chart-Griffe (immer zuoberst).
     if (editChart) {
       const pl = editChart.placement;
@@ -325,7 +426,7 @@ export function TrackViewer({
     }
 
     return result;
-  }, [demMesh, showTerrain, satelliteImage, dem, charts, tracks, curtainsPerTrack, pathsPerTrack, showCurtain, colorMode, isSigned, exagAlt, zScale, altBase, zOffset, editChart]);
+  }, [demMesh, showTerrain, satelliteImage, dem, charts, tracks, curtainsPerTrack, pathsPerTrack, showCurtain, colorMode, isSigned, exagAlt, zScale, altBase, zOffset, editChart, showAccelArrows, accelDecomp, activeIdx]);
 
   const handleViewStateChange = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -362,6 +463,17 @@ export function TrackViewer({
         lines.push(`${lbl} ${sr >= 0 ? "+" : "−"}${Math.abs(sr).toFixed(1)} ${signedUnit}`);
       }
 
+      // G-Vektor-Zerlegung (nur primaerer Track, nur wenn aktiv).
+      if (tIdx === 0 && accelDecomp) {
+        const d = accelDecomp[idx];
+        if (d) {
+          const sgn = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+          const mag = Math.hypot(d.long, d.lateral, d.vertical);
+          lines.push(`a ${mag.toFixed(1)} m/s²`);
+          lines.push(`längs ${sgn(d.long)} · quer ${sgn(d.lateral)} · vert ${sgn(d.vertical)}`);
+        }
+      }
+
       return {
         html: lines.map((l) => `<div>${l}</div>`).join(""),
         style: {
@@ -375,7 +487,7 @@ export function TrackViewer({
         },
       };
     },
-    [tracks, perTrack, signedUnit, colorMode],
+    [tracks, perTrack, signedUnit, colorMode, accelDecomp],
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

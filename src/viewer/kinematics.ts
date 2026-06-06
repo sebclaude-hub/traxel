@@ -126,6 +126,121 @@ export function computeEnergyRate(points: KinematicPoints): (number | null)[] {
   return centralTimeDerivative(energyHeight(points), points.timestamp_ms);
 }
 
+// ---------------------------------------------------------------------------
+// 3D-Beschleunigungsvektor + Zerlegung (laengs/quer/vertikal).
+//
+// Anders als die obigen SKALAREN Groessen (Tangential-Beschl., Energierate)
+// liefert das hier den vollen 3D-Beschleunigungsvektor a = d²x/dt² im
+// Welt-/Bodenrahmen (ENU, Meter) und zerlegt ihn in einem geschwindigkeits-
+// ausgerichteten Horizontalrahmen:
+//   - laengs   = a · ĥ   (ĥ = horizontale Bewegungsrichtung; + = schneller)
+//   - quer     = a · ŝ   (ŝ = ĥ um 90° nach links; + = Linkskurve)
+//   - vertikal = a_up    (+ = nach oben)
+// ĥ, ŝ und ẑ sind orthonormal → laengs·ĥ + quer·ŝ + vertikal·ẑ rekonstruiert a
+// exakt. Kein Fahrzeug-/Lagewissen noetig (Richtung kommt aus der Bewegung).
+//
+// REIN KINEMATISCH (ohne Schwerkraft) und OHNE Glaettung — bewusst: doppelte
+// zentrale Differenz ist die Ableitung, kein Filter. Verrauschen wird in Kauf
+// genommen (Nachruesten moeglich). Einheit ueberall m/s².
+// ---------------------------------------------------------------------------
+
+/** Punkte mit Position fuer den Vektor (im Gegensatz zu KinematicPoints). */
+export interface GeoKinematicPoints {
+  lat: number[];
+  lon: number[];
+  alt: (number | null)[];
+  timestamp_ms: number[];
+}
+
+/** Zerlegte Beschleunigung an einem Punkt (alle m/s², vorzeichenbehaftet). */
+export interface AccelDecomp {
+  /** Laengs zur Bahn (horizontal): + schneller, − langsamer. */
+  long: number;
+  /** Quer zur Bahn (horizontal): + nach links, − nach rechts. */
+  lateral: number;
+  /** Vertikal: + nach oben, − nach unten. */
+  vertical: number;
+  /** Horizontale Bewegungsrichtung als Einheitsvektor (fuer die Pfeil-Achsen). */
+  headingE: number;
+  headingN: number;
+}
+
+/** Unter dieser Horizontalgeschwindigkeit ist die Bewegungsrichtung Rauschen. */
+const MIN_H_SPEED_MPS = 0.5;
+const M_PER_DEG = 111320; // Meter pro Breitengrad (wie in der uebrigen App)
+
+/** lat/lon/alt → lokale ENU-Meter (Ost/Nord/Hoch). Ursprung beliebig (faellt
+ *  bei der Ableitung heraus); Ost-Skalierung mit cos(mittlere Breite). */
+function toLocalEnu(points: GeoKinematicPoints): {
+  east: number[];
+  north: number[];
+  up: (number | null)[];
+} {
+  const { lat, lon, alt } = points;
+  let sum = 0;
+  let cnt = 0;
+  for (const la of lat) {
+    if (Number.isFinite(la)) {
+      sum += la;
+      cnt++;
+    }
+  }
+  const lat0 = cnt ? sum / cnt : 0;
+  const mPerDegLon = M_PER_DEG * Math.cos((lat0 * Math.PI) / 180);
+  const lon0 = lon[0] ?? 0;
+  const la0 = lat[0] ?? 0;
+  return {
+    east: lon.map((lo) => (lo - lon0) * mPerDegLon),
+    north: lat.map((la) => (la - la0) * M_PER_DEG),
+    up: alt.map((a) => (a === null || !Number.isFinite(a) ? null : a)),
+  };
+}
+
+/**
+ * Zerlegt den 3D-Beschleunigungsvektor pro Punkt in laengs/quer/vertikal.
+ * null, wo a nicht bestimmbar ist oder die Horizontalgeschwindigkeit zu klein
+ * ist (Richtung unbestimmt). Ohne Hoehe faellt die Vertikalkomponente auf 0.
+ */
+export function decomposeAcceleration(
+  points: GeoKinematicPoints,
+): (AccelDecomp | null)[] {
+  const ts = points.timestamp_ms;
+  const n = points.lat.length;
+  const { east, north, up } = toLocalEnu(points);
+
+  // Geschwindigkeit (zentrale Differenz der Position), dann Beschleunigung
+  // (zentrale Differenz der Geschwindigkeit) — keine zusaetzliche Glaettung.
+  const vE = centralTimeDerivative(east, ts);
+  const vN = centralTimeDerivative(north, ts);
+  const vU = centralTimeDerivative(up, ts);
+  const aE = centralTimeDerivative(vE, ts);
+  const aN = centralTimeDerivative(vN, ts);
+  const aU = centralTimeDerivative(vU, ts);
+
+  const out: (AccelDecomp | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const ae = aE[i];
+    const an = aN[i];
+    const ve = vE[i];
+    const vn = vN[i];
+    if (ae === null || an === null || ve === null || vn === null) continue;
+    const vh = Math.hypot(ve, vn);
+    if (vh < MIN_H_SPEED_MPS) continue; // Bewegungsrichtung unbestimmt
+    const he = ve / vh;
+    const hn = vn / vh; // ĥ (vorwaerts, horizontal)
+    const se = -hn;
+    const sn = he; // ŝ = ĥ um 90° nach links
+    out[i] = {
+      long: ae * he + an * hn,
+      lateral: ae * se + an * sn,
+      vertical: aU[i] ?? 0,
+      headingE: he,
+      headingN: hn,
+    };
+  }
+  return out;
+}
+
 /**
  * Robuste, symmetrische Skala: p-Perzentil der Betraege (Default 98 %), damit
  * ein einzelner GPS-Spike die Farbskala nicht zusammendrueckt. Immer > 0
