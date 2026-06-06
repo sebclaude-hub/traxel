@@ -181,7 +181,11 @@ export function buildCurtainSegments(
   return segments;
 }
 
-export function makeCurtainLayer(segments: CurtainSegment[], colorMode: ColorMode) {
+export function makeCurtainLayer(
+  segments: CurtainSegment[],
+  colorMode: ColorMode,
+  id = "curtain",
+) {
   const getColor = (d: CurtainSegment): Rgba => {
     if (colorMode === "flight") return flightColor(d.altMslRaw, d.altAglRaw);
     if (colorMode === "drone") return droneColor(d.altAglRaw);
@@ -191,7 +195,7 @@ export function makeCurtainLayer(segments: CurtainSegment[], colorMode: ColorMod
   };
 
   return new SolidPolygonLayer<CurtainSegment>({
-    id: "curtain",
+    id,
     data: segments,
     getPolygon: (d) => d.footprint,
     extruded: true,

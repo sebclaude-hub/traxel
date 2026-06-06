@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChartCorners } from "../viewer/chartPlacement";
 import type { TrackBounds } from "../types";
-import { bboxIntersects, cornersToBounds } from "./spatial";
+import { bboxIntersects, cornersToBounds, unionBounds } from "./spatial";
 
 const bb = (lon_min: number, lat_min: number, lon_max: number, lat_max: number): TrackBounds => ({
   lon_min,
@@ -30,6 +30,24 @@ describe("bboxIntersects", () => {
 
   it("ist disjunkt in Breite", () => {
     expect(bboxIntersects(bb(0, 0, 2, 2), bb(0, 3, 2, 5))).toBe(false);
+  });
+});
+
+describe("unionBounds", () => {
+  it("liefert eine einzelne Box unveraendert zurueck", () => {
+    expect(unionBounds([bb(1, 2, 3, 4)])).toEqual(bb(1, 2, 3, 4));
+  });
+
+  it("bildet die Huelle ueber zwei disjunkte Boxen", () => {
+    expect(unionBounds([bb(0, 0, 1, 1), bb(5, 5, 6, 6)])).toEqual(bb(0, 0, 6, 6));
+  });
+
+  it("bildet die Huelle ueber ueberlappende Boxen", () => {
+    expect(unionBounds([bb(0, 0, 4, 4), bb(2, 2, 6, 3)])).toEqual(bb(0, 0, 6, 4));
+  });
+
+  it("wirft bei leerer Eingabe", () => {
+    expect(() => unionBounds([])).toThrow();
   });
 });
 

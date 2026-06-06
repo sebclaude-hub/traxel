@@ -21,6 +21,19 @@ export interface ColorScale {
   breaks: number[];
 }
 
+/**
+ * Quantilgrenzen ueber MEHRERE Tracks fuer den Track-Vergleich: damit "Rot =
+ * gleiche Geschwindigkeit" auf beiden ueberlagerten Tracks gilt, muss die
+ * Transferfunktion (breaks) ueber die KOMBINIERTEN Werte berechnet und von
+ * beiden geteilt werden. Bei genau einem Track unveraendert zur Einzelskala
+ * (gleiche Quelle/Grenzen wie zuvor → kein Regress fuer den Single-Track-Fall).
+ */
+export function combinedBreaks(tracks: TrackData[], mode: ColorMode): number[] {
+  if (tracks.length === 1) return colorScaleFor(tracks[0], mode).breaks;
+  const all = tracks.flatMap((t) => colorScaleFor(t, mode).values);
+  return computeQuantileBreaks(all).breaks;
+}
+
 export function colorScaleFor(track: TrackData, mode: ColorMode): ColorScale {
   if (mode === "altitude") {
     return { values: track.points.alt, breaks: track.quantile_breaks.altitude_m };

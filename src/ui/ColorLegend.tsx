@@ -119,7 +119,17 @@ function GradientLegend({
   );
 }
 
-export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData }) {
+export function ColorLegend({
+  mode,
+  track,
+  breaks: breaksOverride,
+}: {
+  mode: ColorMode;
+  track: TrackData;
+  /** Beim Track-Vergleich die GEMEINSAMEN breaks (ueber beide Tracks), damit
+   *  die Legende zur geteilten Faerbung passt. Ohne → Einzelskala des Tracks. */
+  breaks?: number[];
+}) {
   // Grenzen + Titel/Einheit fuer die Gradient-Modi (memoisiert; altitude_gnd
   // rechnet die AGL-Quantile aus dem terrain-angereicherten Track). Identische
   // Grenzen-Quelle wie TrackViewer (colorScaleFor) → Legende passt zur Faerbung.
@@ -132,7 +142,7 @@ export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData
     ) {
       return null;
     }
-    const { breaks } = colorScaleFor(track, mode);
+    const breaks = breaksOverride ?? colorScaleFor(track, mode).breaks;
     const meta =
       mode === "speed"
         ? { title: t.speed, unit: "km/h" }
@@ -142,7 +152,7 @@ export function ColorLegend({ mode, track }: { mode: ColorMode; track: TrackData
             ? { title: t.altitudeGnd, unit: "m" }
             : { title: t.energy, unit: "m" };
     return { ...meta, breaks };
-  }, [mode, track]);
+  }, [mode, track, breaksOverride]);
 
   // Diskrete Klassen (Flug/Drohne).
   if (mode === "flight" || mode === "drone") {

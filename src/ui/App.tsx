@@ -11,7 +11,8 @@ import { enrichTrackWithTerrain, suggestDemOffset } from "../pipeline/terrain";
 import type { SatelliteImage } from "../pipeline/terrain/satellite";
 import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
-import { cornersToBounds } from "../library/spatial";
+import { combinedBreaks } from "../viewer/colorScale";
+import { cornersToBounds, unionBounds } from "../library/spatial";
 import {
   getChartRecord,
   hashImageBytes,
@@ -87,6 +88,13 @@ export default function App() {
   const { loadTrackText, loadTerrain, loadSatellite } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
   const [satellites, setSatellites] = useState<SatelliteData | null>(null);
+  // Hash des Haupttracks — fuer die Bibliothek (deaktiviert "Vergleichen" auf
+  // dem aktuell angezeigten Track).
+  const [primaryHash, setPrimaryHash] = useState<string | null>(null);
+  // Vergleichstrack: wird als zweites Overlay ueberlagert (gemeinsames Terrain,
+  // gemeinsame Kamera, gemeinsame Farbskala). Roh geladen — ohne eigene Cuts in
+  // dieser Ausbaustufe. Ein Wechsel des Haupttracks verwirft den Vergleich.
+  const [compareTrack, setCompareTrack] = useState<TrackData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -137,10 +145,21 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Terrain laden, sobald ein Track vorliegt (im Worker). Bei Trackwechsel
-  // wird der vorherige Lauf per cancelled-Flag verworfen.
+  // DEM-/Satelliten-Abdeckung: beim Vergleich die VEREINIGUNG beider Track-
+  // Bounds, damit ein gemeinsames Terrain unter beiden Tracks liegt. Aus den
+  // rohen Track-Bounds (vor Cuts) — Cuts koennen den Bereich nur verkleinern.
+  const demBounds = useMemo(() => {
+    if (!track) return null;
+    return compareTrack
+      ? unionBounds([track.meta.bounds, compareTrack.meta.bounds])
+      : track.meta.bounds;
+  }, [track, compareTrack]);
+
+  // Terrain laden, sobald ein Track vorliegt (im Worker). Bei Trackwechsel ODER
+  // hinzukommendem Vergleichstrack (groessere Bounds) neu laden; der vorherige
+  // Lauf wird per cancelled-Flag verworfen.
   useEffect(() => {
-    if (!track) {
+    if (!demBounds) {
       setDem(null);
       setTerrainState("idle");
       return;
@@ -148,7 +167,7 @@ export default function App() {
     let cancelled = false;
     setDem(null);
     setTerrainState("loading");
-    loadTerrain(track.meta.bounds, TERRAIN_DETAIL[terrainDetail])
+    loadTerrain(demBounds, TERRAIN_DETAIL[terrainDetail])
       .then((grid) => {
         if (!cancelled) {
           setDem(grid);
@@ -161,18 +180,18 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [track, loadTerrain, terrainDetail]);
+  }, [demBounds, loadTerrain, terrainDetail]);
 
   // Satellitenbilder laden, sobald der Nutzer "Satellit"-Ansicht waehlt.
-  // Neu laden wenn Track oder Detailstufe wechselt.
+  // Neu laden wenn Bounds (Track/Vergleich) oder Detailstufe wechseln.
   useEffect(() => {
-    if (terrainView !== "sat" || !track) {
+    if (terrainView !== "sat" || !demBounds) {
       return;
     }
     let cancelled = false;
     setSatelliteImage(null);
     setSatelliteState("loading");
-    loadSatellite(track.meta.bounds)
+    loadSatellite(demBounds)
       .then((sat) => {
         if (!cancelled) {
           setSatelliteImage(sat);
@@ -185,13 +204,14 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [terrainView, track, loadSatellite]);
+  }, [terrainView, demBounds, loadSatellite]);
 
   // Gemeinsamer Post-Load-Code: State setzen, Cuts/Charts zuruecksetzen. Wird
   // vom Datei-Import UND vom Wiederoeffnen aus der Bibliothek genutzt.
   const applyLoadedTrack = useCallback((td: TrackData, sat: SatelliteData | null) => {
     setTrack(td);
     setSatellites(sat);
+    setCompareTrack(null); // neuer Haupttrack → bestehenden Vergleich verwerfen
     setCuts([]);
     setCharts([]);
     setEditChartId(null);
@@ -214,6 +234,7 @@ export default function App() {
           applyLoadedTrack(td, sat);
           // Track automatisch in der Bibliothek merken (Recents, Dedupe per Hash).
           const hash = await hashTrackText(text);
+          setPrimaryHash(hash);
           void saveTrack(
             {
               hash,
@@ -255,6 +276,7 @@ export default function App() {
         }
         const { track: td, satellites: sat } = await loadTrackText(text, `${name}.${format}`);
         applyLoadedTrack(td, sat);
+        setPrimaryHash(hash);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -262,6 +284,30 @@ export default function App() {
       }
     },
     [loadTrackText, applyLoadedTrack],
+  );
+
+  // Vergleichstrack aus der Bibliothek als Overlay dazuladen (Haupttrack bleibt).
+  const openCompareFromLibrary = useCallback(
+    async (hash: string, name: string, format: string) => {
+      if (!track) return;
+      setError(null);
+      try {
+        const text = await readTrackText(hash);
+        if (text === null) {
+          setError("Vergleichstrack nicht mehr in der Bibliothek gefunden.");
+          return;
+        }
+        const { track: td } = await loadTrackText(text, `${name}.${format}`);
+        if (td.meta.n_points === 0) {
+          setError("Vergleichstrack enthält keine gültigen Punkte.");
+          return;
+        }
+        setCompareTrack(td);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [track, loadTrackText],
   );
 
   // PNG-Karte importieren. Ist das Bild (per Hash) schon in der Bibliothek,
@@ -471,6 +517,24 @@ export default function App() {
     [displayTrack, activeDem, zOffset],
   );
 
+  // Vergleichstrack ebenfalls mit Terrain anreichern (gleiches DEM + Offset),
+  // damit AGL-/Flug-/GND-Modi auch fuer ihn stimmen. Keine Cuts in dieser Stufe.
+  const viewCompareTrack = useMemo(
+    () =>
+      compareTrack && activeDem
+        ? enrichTrackWithTerrain(compareTrack, activeDem, zOffset)
+        : compareTrack,
+    [compareTrack, activeDem, zOffset],
+  );
+
+  // Alle anzuzeigenden Tracks (Haupttrack zuerst). Der Viewer leitet daraus die
+  // geteilte Farbskala ab.
+  const viewTracks = useMemo(
+    () =>
+      viewTrack ? (viewCompareTrack ? [viewTrack, viewCompareTrack] : [viewTrack]) : [],
+    [viewTrack, viewCompareTrack],
+  );
+
   // Vorgeschlagener DEM-Z-Offset (Boden: Track so tief wie moeglich ohne
   // Pokethrough; Flug: 0). Aus dem ROHEN DEM berechnet (ohne aktuellen
   // Offset), daher haengt es nicht an zOffset → keine Rueckkopplung.
@@ -507,6 +571,13 @@ export default function App() {
       : colorMode === "altitude_gnd"
         ? "altitude"
         : colorMode;
+  // Beim Vergleich: gemeinsame Quantilgrenzen ueber beide Tracks → die Legende
+  // zeigt die GETEILTE Skala (sonst passte sie nur zum Haupttrack). Nur fuer die
+  // Plasma-Modi relevant; andere Modi ignorieren breaks in der Legende.
+  const legendBreaks = useMemo(
+    () => (viewTracks.length > 1 ? combinedBreaks(viewTracks, effColorMode) : undefined),
+    [viewTracks, effColorMode],
+  );
   // "Beschl." (3D-Tangentialbeschleunigung) braucht kein Terrain → in beiden
   // Listen. "Höhe GND" (über Grund) nur mit Terrain; "Höhe MSL" immer.
   const colorOptions: [ColorMode, string][] = activeDem
@@ -560,6 +631,31 @@ export default function App() {
             {satelliteState === "loading" && " · Satellit lädt…"}
             {satelliteState === "error" && " · Satellit nicht verfügbar"}
           </span>
+          {compareTrack && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                color: "#bcd",
+                background: "#1f2a3a",
+                border: "1px solid #2a3a4a",
+                borderRadius: 4,
+                padding: "2px 6px",
+              }}
+              title="Vergleichstrack (Overlay)"
+            >
+              ⇄ {compareTrack.meta.name}
+              <button
+                style={{ ...btnStyle, padding: "0 5px", fontSize: 11 }}
+                onClick={() => setCompareTrack(null)}
+                title="Vergleich beenden"
+              >
+                ✕
+              </button>
+            </span>
+          )}
           <button style={btnStyle} onClick={() => fileInputRef.current?.click()}>
             Andere Datei…
           </button>
@@ -595,7 +691,7 @@ export default function App() {
         {viewTrack ? (
           <>
             <TrackViewer
-              track={viewTrack}
+              tracks={viewTracks}
               dem={activeDem}
               colorMode={effColorMode}
               showCurtain={showCurtain}
@@ -612,7 +708,7 @@ export default function App() {
                 options={colorOptions}
                 onChange={setColorMode}
               />
-              <ColorLegend mode={effColorMode} track={viewTrack} />
+              <ColorLegend mode={effColorMode} track={viewTrack} breaks={legendBreaks} />
               <Segmented<boolean>
                 value={showCurtain}
                 options={[
@@ -815,6 +911,15 @@ export default function App() {
             setLibraryOpen(false);
             void openTrackFromLibrary(hash, name, format);
           }}
+          onCompareTrack={
+            track
+              ? (hash, name, format) => {
+                  setLibraryOpen(false);
+                  void openCompareFromLibrary(hash, name, format);
+                }
+              : undefined
+          }
+          activeTrackHash={primaryHash}
           onChartDeleted={(hash) =>
             setCharts((cs) => cs.filter((c) => c.hash !== hash))
           }

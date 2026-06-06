@@ -23,6 +23,7 @@ const t = {
   tracks: "Tracks",
   charts: "Karten",
   open: "Öffnen",
+  compare: "Vergleichen",
   remove: "Entfernen",
   close: "Schließen",
   noTracks: "Noch keine Tracks gespeichert.",
@@ -39,10 +40,18 @@ function fmtDate(iso: string | null, fallbackMs: number): string {
 export function LibraryPanel({
   onClose,
   onOpenTrack,
+  onCompareTrack,
+  activeTrackHash,
   onChartDeleted,
 }: {
   onClose: () => void;
   onOpenTrack: (hash: string, name: string, format: string) => void;
+  /** Track als Vergleich (Overlay) zum aktuellen laden. Nur verfuegbar, wenn
+   *  bereits ein Track angezeigt wird (sonst undefined). */
+  onCompareTrack?: (hash: string, name: string, format: string) => void;
+  /** Hash des aktuell angezeigten Haupttracks — fuer diesen wird "Vergleichen"
+   *  deaktiviert (ein Track mit sich selbst zu vergleichen ist sinnlos). */
+  activeTrackHash?: string | null;
   /** App-seitige Synchronisierung: aktuell angezeigte Karte aus dem State werfen. */
   onChartDeleted: (hash: string) => void;
 }) {
@@ -110,6 +119,15 @@ export function LibraryPanel({
               >
                 {t.open}
               </button>
+              {onCompareTrack && trk.hash !== activeTrackHash && (
+                <button
+                  style={btn}
+                  title="Als Overlay zum aktuellen Track vergleichen"
+                  onClick={() => onCompareTrack(trk.hash, trk.name, trk.format)}
+                >
+                  {t.compare}
+                </button>
+              )}
               <button style={btn} title={t.remove} onClick={() => void handleDeleteTrack(trk.hash)}>
                 ✕
               </button>

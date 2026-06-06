@@ -24,6 +24,22 @@ export function bboxIntersects(a: TrackBounds, b: TrackBounds): boolean {
   );
 }
 
+/**
+ * Achsenparallele Huelle ueber mehrere Bounding-Boxen. Genutzt fuer den
+ * Track-Vergleich: DEM/Satellitenbild muss den Bereich BEIDER Tracks abdecken,
+ * also wird ueber ihre Bounds die Vereinigung gebildet. Leere Eingabe → Fehler
+ * (Aufrufer haben immer mindestens einen Track).
+ */
+export function unionBounds(boxes: TrackBounds[]): TrackBounds {
+  if (boxes.length === 0) throw new Error("unionBounds: keine Bounds");
+  return boxes.reduce((acc, b) => ({
+    lon_min: Math.min(acc.lon_min, b.lon_min),
+    lon_max: Math.max(acc.lon_max, b.lon_max),
+    lat_min: Math.min(acc.lat_min, b.lat_min),
+    lat_max: Math.max(acc.lat_max, b.lat_max),
+  }));
+}
+
 /** Achsenparallele Huelle (lon/lat min/max) ueber die vier Eckkoordinaten. */
 export function cornersToBounds(c: ChartCorners): TrackBounds {
   const lons = [c.corner_tl[0], c.corner_tr[0], c.corner_bl[0], c.corner_br[0]];
