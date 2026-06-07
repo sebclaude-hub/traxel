@@ -7,6 +7,7 @@ import {
   energyHeight,
   robustSymmetricScale,
   speed3D,
+  type AccelDecomp,
   type GeoKinematicPoints,
   type KinematicPoints,
 } from "./kinematics";
@@ -196,5 +197,29 @@ describe("decomposeAcceleration", () => {
     const xy: [number, number][] = Array.from({ length: 5 }, () => [0, 0]);
     const d = decomposeAcceleration(geo(xy, xy.map(() => 100)));
     expect(d[2]).toBeNull();
+  });
+
+  it("daempft mit smooth den Querbeschleunigungs-Spike eines Ausreissers", () => {
+    // Geradeausfahrt nach Osten mit 10 m/s; Punkt 4 ist um 1 m nach Nord
+    // versetzt → erzeugt einen scharfen Quer-Spike (doppelte Differenz).
+    const xy: [number, number][] = Array.from({ length: 9 }, (_v, k) => [
+      10 * k,
+      k === 4 ? 1 : 0,
+    ]);
+    const pts = geo(xy, xy.map(() => 100));
+    const peak = (ds: (AccelDecomp | null)[]) =>
+      Math.max(...ds.map((d) => (d ? Math.abs(d.lateral) : 0)));
+    const raw = peak(decomposeAcceleration(pts));
+    const smoothed = peak(decomposeAcceleration(pts, { smooth: true }));
+    expect(smoothed).toBeLessThan(raw); // 3-Punkt-Mittel senkt die Spitze
+  });
+
+  it("laesst gleichmaessige Beschleunigung unveraendert (Konstante bleibt konstant)", () => {
+    // x = t² → a = 2 m/s² ueberall; ein gleitendes Mittel einer Konstanten
+    // gibt dieselbe Konstante zurueck.
+    const xy: [number, number][] = Array.from({ length: 9 }, (_v, k) => [k * k, 0]);
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)), { smooth: true })[4]!;
+    expect(d.long).toBeCloseTo(2, 5);
+    expect(Math.abs(d.lateral)).toBeLessThan(0.02);
   });
 });

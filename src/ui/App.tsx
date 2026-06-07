@@ -311,6 +311,7 @@ export default function App() {
           return;
         }
         setCompareTrack(td);
+        setPlaying(false); // G-Vektor/Slider entfaellt im Vergleich → Wiedergabe stoppen
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -543,11 +544,20 @@ export default function App() {
     [viewTrack, viewCompareTrack],
   );
 
+  // G-Vektor ist im Vergleichsmodus deaktiviert: die Pfeile + der Punkt-Slider
+  // beziehen sich nur auf den primaeren Track, und die Kombination aus zwei
+  // ueberlagerten Tracks + abgefahrenem Aktivpunkt fuehrte zu einem Absturz
+  // (Testbefund A10). Bis zur sauberen Ursachenklaerung: beim Vergleich aus.
+  const accelActive = showAccel && !compareTrack;
+
   // Beschleunigungs-Zerlegung des primaeren Tracks (nur im G-Vektor-Modus —
   // ist die 2. Ableitung, also nicht umsonst rechnen). Speist Pfeile + Readout.
   const accelDecomp = useMemo(
-    () => (showAccel && viewTrack ? decomposeAcceleration(viewTrack.points) : null),
-    [showAccel, viewTrack],
+    () =>
+      accelActive && viewTrack
+        ? decomposeAcceleration(viewTrack.points, { smooth: true })
+        : null,
+    [accelActive, viewTrack],
   );
 
   // Wiedergabe: aktiven Punkt im gewaehlten Takt hochzaehlen (mit Schleife).
@@ -730,7 +740,7 @@ export default function App() {
               editChart={editChart}
               accelDecomp={accelDecomp}
               activeIdx={safeIdx}
-              showAccelArrows={showAccel}
+              showAccelArrows={accelActive}
             />
             <div style={togglesStyle}>
               <Segmented<ColorMode>
@@ -747,14 +757,24 @@ export default function App() {
                 ]}
                 onChange={setShowCurtain}
               />
-              <Segmented<boolean>
-                value={showAccel}
-                options={[
-                  [true, "G-Vektor"],
-                  [false, "aus"],
-                ]}
-                onChange={setShowAccel}
-              />
+              {compareTrack ? (
+                <button
+                  style={{ ...btnStyle, opacity: 0.5, cursor: "not-allowed" }}
+                  disabled
+                  title="G-Vektor ist im Vergleichsmodus deaktiviert (Pfeile gelten nur fuer den primaeren Track)."
+                >
+                  G-Vektor (im Vergleich aus)
+                </button>
+              ) : (
+                <Segmented<boolean>
+                  value={showAccel}
+                  options={[
+                    [true, "G-Vektor"],
+                    [false, "aus"],
+                  ]}
+                  onChange={setShowAccel}
+                />
+              )}
               {dem && (
                 <Segmented<TerrainView>
                   value={terrainView}
@@ -912,7 +932,7 @@ export default function App() {
         )}
         </div>
 
-        {viewTrack && (displaySatellites || (showAccel && accelDecomp)) && (
+        {viewTrack && (displaySatellites || (accelActive && accelDecomp)) && (
           <div style={sidePanelStyle}>
             {displaySatellites && (
               <>
@@ -925,14 +945,14 @@ export default function App() {
                 </div>
               </>
             )}
-            {showAccel && accelDecomp && (
+            {accelActive && accelDecomp && (
               <AccelReadout decomp={accelDecomp[safeIdx] ?? null} />
             )}
           </div>
         )}
       </div>
 
-      {viewTrack && (displaySatellites || showAccel) && (
+      {viewTrack && (displaySatellites || accelActive) && (
         <div style={sliderStyle}>
           <button
             style={btnStyle}

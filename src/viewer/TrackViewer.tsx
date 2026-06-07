@@ -96,9 +96,13 @@ interface DeckViewState {
 const FALLBACK: Rgba = [150, 150, 150, 180];
 
 // G-Vektor-Pfeile: feste Laenge in Metern je 1 m/s² (kein Regler — die Pfeile
-// werden ohnehin erst im hineingezoomten Zustand gut sichtbar). Farben:
-// laengs=gruen, quer=orange, vertikal=blau, Aktiv-Marker weiss.
-const ARROW_M_PER_MS2 = 20;
+// werden ohnehin erst im hineingezoomten Zustand gut sichtbar). Empirisch am
+// GA-Flug getunt: die kinematischen Beschleunigungen sind dort klein (oft
+// < 1 m/s²), 20 m/(m/s²) waren kaum sichtbar → Faktor 20 hoeher. Sehr dynamische
+// Quellen (Motorrad, ~8 m/s²) wuerden hiermit lange Pfeile erzeugen; falls noetig
+// spaeter quellenabhaengig skalieren. Farben: laengs=gruen, quer=orange,
+// vertikal=blau, Aktiv-Marker weiss.
+const ARROW_M_PER_MS2 = 400;
 const COL_LONG: Rgba = [80, 210, 120, 255];
 const COL_LAT: Rgba = [240, 150, 40, 255];
 const COL_VERT: Rgba = [80, 150, 240, 255];
