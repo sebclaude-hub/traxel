@@ -68,9 +68,10 @@ export interface TrackPoints {
   speed_q_idx: number[];
   /** Quantilklasse 0..n-1 der Hoehe pro Punkt; -1 = ohne Wert. */
   alt_q_idx: number[];
-  /** True, wenn der Zeitstempel dieses Punktes durch einen synthetic-Cut
-   *  verschoben wurde (Pro-Punkt-Hinweis). Fehlt = ueberall false. */
-  is_synthetic?: boolean[];
+  /** True, wenn der Zeitstempel dieses Punktes durch einen bridge-Cut
+   *  (Ueberbruecken) nach vorne verschoben wurde (Pro-Punkt-Hinweis).
+   *  Fehlt = ueberall false. */
+  is_bridged?: boolean[];
 }
 
 export interface TrackData {

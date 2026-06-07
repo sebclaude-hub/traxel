@@ -865,9 +865,17 @@ export default function App() {
                   <Segmented<CutMode>
                     value={cutMode}
                     options={[
-                      ["trim", "Trim"],
-                      ["gap", "Lücke"],
-                      ["synthetic", "Privacy"],
+                      ["trim", "Trim", "Entfernt Punkte am Rand. Zeit unverändert."],
+                      [
+                        "gap",
+                        "Lücke",
+                        "Entfernt das Stück, behält aber die Zeit → sichtbare Lücke / niedrige Geschwindigkeit. Gesamtzeit bleibt original.",
+                      ],
+                      [
+                        "bridge",
+                        "Überbrücken",
+                        "Entfernt das Stück und schließt die Zeitlücke (plausible Durchfahrt statt Pause) → reine Bewegungszeit. Die Satellitenkonstellation ab hier entspricht nicht mehr der echten Zeit.",
+                      ],
                     ]}
                     onChange={setCutMode}
                   />
@@ -1102,15 +1110,17 @@ function Segmented<T extends string | boolean>({
   onChange,
 }: {
   value: T;
-  options: [T, string][];
+  /** [Wert, Label, optionaler Tooltip]. */
+  options: [T, string, string?][];
   onChange: (v: T) => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-      {options.map(([v, label]) => (
+      {options.map(([v, label, title]) => (
         <button
           key={String(v)}
           style={v === value ? btnActiveStyle : btnStyle}
+          title={title}
           onClick={() => onChange(v)}
         >
           {label}

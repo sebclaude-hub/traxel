@@ -63,13 +63,13 @@ describe("applyCuts", () => {
     const res = applyCuts(sample(), null, [{ start: 2, end: 3, mode: "gap" }]);
     expect(res.track.meta.n_points).toBe(4);
     expect(res.track.points.timestamp_ms).toEqual([0, 10000, 40000, 50000]);
-    expect(res.track.points.is_synthetic).toEqual([false, false, false, false]);
+    expect(res.track.points.is_bridged).toEqual([false, false, false, false]);
     expect(res.derivation?.type).toBe("gap");
     expect(res.derivation?.severity).toBe("info");
   });
 
-  it("synthetic verschiebt nachfolgende Zeitstempel und markiert is_synthetic", () => {
-    const res = applyCuts(sample(), null, [{ start: 2, end: 3, mode: "synthetic" }]);
+  it("bridge (überbrücken) verschiebt nachfolgende Zeitstempel und markiert is_bridged", () => {
+    const res = applyCuts(sample(), null, [{ start: 2, end: 3, mode: "bridge" }]);
     expect(res.track.meta.n_points).toBe(4);
     const ts = res.track.points.timestamp_ms;
     // Punkte 0,1 unveraendert; 4,5 nach vorne geschoben (Pause 30s − Brueckenzeit ~10s ≈ 20s).
@@ -79,15 +79,15 @@ describe("applyCuts", () => {
     expect(ts[2]).toBeLessThan(22000);
     // Abstand zwischen den verschobenen Punkten bleibt 10 s.
     expect(ts[3] - ts[2]).toBe(10000);
-    expect(res.track.points.is_synthetic).toEqual([false, false, true, true]);
-    expect(res.derivation?.type).toBe("synthetic");
+    expect(res.track.points.is_bridged).toEqual([false, false, true, true]);
+    expect(res.derivation?.type).toBe("bridge");
     expect(res.derivation?.severity).toBe("warn");
     expect(res.derivation?.total_time_shift_s).toBeGreaterThan(15);
     expect(res.derivation?.total_time_shift_s).toBeLessThan(25);
   });
 
-  it("erzwingt trim fuer Edge-Cuts (synthetic am Anfang → trim, kein Banner)", () => {
-    const res = applyCuts(sample(), null, [{ start: 0, end: 1, mode: "synthetic" }]);
+  it("erzwingt trim fuer Edge-Cuts (bridge am Anfang → trim, kein Banner)", () => {
+    const res = applyCuts(sample(), null, [{ start: 0, end: 1, mode: "bridge" }]);
     expect(res.track.points.timestamp_ms).toEqual([20000, 30000, 40000, 50000]);
     expect(res.derivation).toBeNull();
   });

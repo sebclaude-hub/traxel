@@ -6,14 +6,16 @@
 //   * trim      — Punkte entfernen, Zeitstempel unveraendert (Rand-/Muell-
 //                 Schnitte; Edge-Cuts werden IMMER auf trim gezwungen)
 //   * gap       — Punkte entfernen, Zeitstempel unveraendert; sichtbare Luecke
-//   * synthetic — Punkte entfernen UND alle nachfolgenden Zeitstempel nach
-//                 vorne schieben, sodass die Pause nicht erkennbar ist
-//                 (Privacy). Brueckenzeit = Distanz / mittlere Nachbar-Speed.
+//   * bridge    — Punkte entfernen UND alle nachfolgenden Zeitstempel nach
+//                 vorne schieben, sodass die Zeitluecke geschlossen wird
+//                 ("ueberbruecken"). Brueckenzeit = Distanz / mittlere
+//                 Nachbar-Speed → ersetzt die Pause durch eine plausible
+//                 Durchfahrt. Zweck: reine Bewegungszeit (z.B. Fahrt ohne
+//                 ueberlange Ladepausen) — TRANSPARENT, nicht zum Verbergen.
 //
-// Datenschutz (synthetic): fuer den Eigentümer bleiben die Satellitendaten
-// sichtbar, ergaenzt um eine Banner-Warnung, dass die Konstellation ab dem
-// Cut nicht mehr der Realitaet entspricht. (Das Entfernen der Satellitendaten
-// beim Export kommt mit der Export-Funktion.)
+// Transparenz (bridge): die Satellitendaten bleiben erhalten (auch im Export),
+// ergaenzt um eine Banner-Warnung, dass die Konstellation ab dem Cut nicht mehr
+// der echten Zeit entspricht (weil die Zeit nach vorne verschoben wurde).
 //
 // Reine Funktion → unit-testbar.
 // ---------------------------------------------------------------------------
@@ -23,7 +25,7 @@ import { DEFAULT_QUANTILES } from "../constants";
 import { geodesicDistanceMeters } from "./geo";
 import { computeQuantileBreaks } from "./quantiles";
 
-export type CutMode = "trim" | "gap" | "synthetic";
+export type CutMode = "trim" | "gap" | "bridge";
 
 export interface CutSpec {
   start: number;
@@ -32,12 +34,12 @@ export interface CutSpec {
 }
 
 export interface Derivation {
-  type: "gap" | "synthetic";
+  type: "gap" | "bridge";
   severity: "info" | "warn";
   n_cuts: number;
   n_trim_cuts: number;
   n_gap_cuts: number;
-  n_synthetic_cuts: number;
+  n_bridge_cuts: number;
   n_points_before: number;
   n_points_after: number;
   n_points_removed: number;
@@ -106,31 +108,31 @@ function minMax(arr: number[]): { min: number; max: number } {
 }
 
 function buildDerivation(
-  counts: { trim: number; gap: number; synthetic: number },
+  counts: { trim: number; gap: number; bridge: number },
   nBefore: number,
   nAfter: number,
   totalShiftS: number,
 ): Derivation | null {
-  const total = counts.trim + counts.gap + counts.synthetic;
+  const total = counts.trim + counts.gap + counts.bridge;
   if (total === 0) return null;
   const base = {
     n_cuts: total,
     n_trim_cuts: counts.trim,
     n_gap_cuts: counts.gap,
-    n_synthetic_cuts: counts.synthetic,
+    n_bridge_cuts: counts.bridge,
     n_points_before: nBefore,
     n_points_after: nAfter,
     n_points_removed: nBefore - nAfter,
   };
-  if (counts.synthetic > 0) {
+  if (counts.bridge > 0) {
     return {
       ...base,
-      type: "synthetic",
+      type: "bridge",
       severity: "warn",
       total_time_shift_s: Math.round(totalShiftS * 10) / 10,
       message:
-        "Zeitstempel wurden verschoben, um Pausen auszublenden. Die Satelliten" +
-        "konstellation ab dem Schnitt entspricht nicht mehr der Realität.",
+        "Pausen wurden überbrückt (Zeitlücke geschlossen). Die Satelliten" +
+        "konstellation ab dem Schnitt entspricht nicht mehr der echten Zeit.",
     };
   }
   if (counts.gap > 0) {
@@ -176,8 +178,8 @@ export function applyCuts(
 
   const keep = new Array<boolean>(n).fill(true);
   const shiftAfterS = new Array<number>(n).fill(0);
-  const isSynth = new Array<boolean>(n).fill(false);
-  const counts = { trim: 0, gap: 0, synthetic: 0 };
+  const isBridged = new Array<boolean>(n).fill(false);
+  const counts = { trim: 0, gap: 0, bridge: 0 };
   let totalShift = 0;
 
   for (const spec of norm) {
@@ -185,7 +187,7 @@ export function applyCuts(
     for (let i = lo; i <= hi; i++) keep[i] = false;
     counts[spec.mode]++;
 
-    if (spec.mode !== "synthetic") continue;
+    if (spec.mode !== "bridge") continue;
     if (lo === 0 || hi === n - 1) continue; // Edge: nichts zu ueberbruecken
 
     const pauseS = (p.timestamp_ms[hi + 1] - p.timestamp_ms[lo - 1]) / 1000;
@@ -202,7 +204,7 @@ export function applyCuts(
     totalShift += shiftS;
     for (let i = hi + 1; i < n; i++) {
       shiftAfterS[i] += shiftS;
-      isSynth[i] = true;
+      isBridged[i] = true;
     }
   }
 
@@ -231,7 +233,7 @@ export function applyCuts(
     timestamp_ms: timestampMs,
     speed_q_idx: speedQ.qIdx,
     alt_q_idx: altQ.qIdx,
-    is_synthetic: idx.map((i) => isSynth[i]),
+    is_bridged: idx.map((i) => isBridged[i]),
   };
 
   const m = idx.length;
