@@ -2,3 +2,6 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Maschinenspezifische Cargo-Konfiguration (MSVC-Pfade)
+/.cargo/
