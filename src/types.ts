@@ -122,3 +122,16 @@ export interface SatelliteData {
   /** Pro Talker: Trackindex → Burst-Index in bursts_by_talker (-1 = keiner). */
   burst_idx_by_track: Record<string, number[]>;
 }
+
+// ---------------------------------------------------------------------------
+// Karten-Overlay (Anflugkarten)
+// ---------------------------------------------------------------------------
+
+/** Platzierung einer geographischen Karte: Zentrum + Groesse (Meter) + Rotation. */
+export interface ChartPlacement {
+  centerLon: number;
+  centerLat: number;
+  widthM: number;
+  heightM: number;
+  rotationDeg: number;
+}

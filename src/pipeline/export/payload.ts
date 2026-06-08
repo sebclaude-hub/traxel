@@ -4,7 +4,8 @@
 //
 // Inhalt: TrackData + optionale Satellitendaten + optionale Derivation
 // (Transparenz-Hinweis eines bridge-Cuts, der MIT in die Datei reist) +
-// optionales DEM. Die Satellitendaten werden NICHT entfernt.
+// optionales DEM + optionale Anflugkarten (PNG-Bytes + Platzierung).
+// Die Satellitendaten werden NICHT entfernt.
 //
 // Groessen-Trick (DEM kann Millionen Zellen haben):
 //   1. Hoehen auf int16-Meter quantisieren (Verlust < Quell-Genauigkeit von
@@ -20,20 +21,21 @@
 //
 // Container-Layout (VOR gzip):
 //   [ "TRXL" 4 Byte ][ version u16 LE ][ headerLen u32 LE ]
-//   [ Header-JSON (UTF-8, ohne dem.elevations) ]
+//   [ Header-JSON (UTF-8, ohne dem.elevations und chart.pngBytes) ]
 //   [ DEM-Block: Null-Bitmaske (ceil(count/8) Byte) + count × delta int16 LE ]
+//   [ Chart-Block: count u16 LE + fuer jede Karte: pngLen u32 LE + PNG-Bytes ]
 //
 // Endianness ist explizit Little-Endian per DataView — niemals
 // `new Int16Array(buffer)`, das wuerde Host-Endianness benutzen und geteilte
 // Dateien plattformuebergreifend korrumpieren.
 // ---------------------------------------------------------------------------
 
-import type { DemGrid, SatelliteData, TrackData } from "../../types";
+import type { ChartPlacement, DemGrid, SatelliteData, TrackData } from "../../types";
 import type { Derivation } from "../processing/cuts";
 import { gunzip, gzip } from "./gzip";
 
 const MAGIC = "TRXL"; // 4 ASCII-Bytes
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
 
 // Gueltige Hoehen werden auf [-32767, 32767] geklemmt (Erde: -432 .. 8849 m).
 const ELEV_MIN = -32767;
@@ -41,11 +43,20 @@ const ELEV_MAX = 32767;
 
 const HEADER_OFFSET = 10; // 4 (magic) + 2 (version) + 4 (headerLen)
 
+/** Eine Anflugkarte im Export: PNG-Bytes + Platzierungsmetadaten. */
+export interface ChartExportItem {
+  name: string;
+  placement: ChartPlacement;
+  elevationM: number;
+  pngBytes: Uint8Array;
+}
+
 export interface ExportInput {
   track: TrackData;
   satellites?: SatelliteData | null;
   derivation?: Derivation | null;
   dem?: DemGrid | null;
+  charts?: ChartExportItem[] | null;
 }
 
 export interface DecodedPayload {
@@ -54,6 +65,8 @@ export interface DecodedPayload {
   satellites: SatelliteData | null;
   derivation: Derivation | null;
   dem: DemGrid | null;
+  /** Anflugkarten (immer ein Array, ggf. leer). */
+  charts: ChartExportItem[];
 }
 
 /** Hoehe → gerundetes, geklemmtes int16-Meter-Quantum. */
@@ -138,9 +151,10 @@ function decodeDemBlock(
  */
 export async function encodePayload(input: ExportInput): Promise<Uint8Array> {
   const dem = input.dem ?? null;
+  const charts = input.charts ?? [];
 
-  // JSON-Kopf: alles ausser den DEM-Hoehen (die kommen als Binaerblock).
-  const header = {
+  // JSON-Kopf: alles ausser den DEM-Hoehen und PNG-Bytes (die kommen als Binaerbloecke).
+  const headerData = {
     track: input.track,
     satellites: input.satellites ?? null,
     derivation: input.derivation ?? null,
@@ -154,11 +168,17 @@ export async function encodePayload(input: ExportInput): Promise<Uint8Array> {
           lon_max: dem.lon_max,
         }
       : null,
+    charts: charts.length > 0
+      ? charts.map((c) => ({ name: c.name, placement: c.placement, elevationM: c.elevationM }))
+      : null,
   };
-  const headerBytes = new TextEncoder().encode(JSON.stringify(header));
+  const headerBytes = new TextEncoder().encode(JSON.stringify(headerData));
   const demBytes = dem ? encodeDemBlock(dem) : new Uint8Array(0);
 
-  const total = HEADER_OFFSET + headerBytes.length + demBytes.length;
+  // Chart-Block: u16 Anzahl + fuer jede Karte: u32 pngLen + PNG-Bytes
+  const chartBlockLen = 2 + charts.reduce((sum, c) => sum + 4 + c.pngBytes.length, 0);
+
+  const total = HEADER_OFFSET + headerBytes.length + demBytes.length + chartBlockLen;
   const container = new Uint8Array(total);
   const view = new DataView(container.buffer);
 
@@ -166,7 +186,19 @@ export async function encodePayload(input: ExportInput): Promise<Uint8Array> {
   view.setUint16(4, FORMAT_VERSION, true);
   view.setUint32(6, headerBytes.length, true);
   container.set(headerBytes, HEADER_OFFSET);
-  container.set(demBytes, HEADER_OFFSET + headerBytes.length);
+
+  let pos = HEADER_OFFSET + headerBytes.length;
+  container.set(demBytes, pos);
+  pos += demBytes.length;
+
+  view.setUint16(pos, charts.length, true);
+  pos += 2;
+  for (const c of charts) {
+    view.setUint32(pos, c.pngBytes.length, true);
+    pos += 4;
+    container.set(c.pngBytes, pos);
+    pos += c.pngBytes.length;
+  }
 
   return gzip(container);
 }
@@ -213,11 +245,14 @@ export async function decodePayload(packed: Uint8Array): Promise<DecodedPayload>
   const headerBytes = container.subarray(HEADER_OFFSET, headerEnd);
   const header = JSON.parse(new TextDecoder().decode(headerBytes));
 
+  // DEM-Block lesen.
   let dem: DemGrid | null = null;
+  let afterDemPos = headerEnd;
   if (header.dem) {
     const { n_rows, n_cols } = header.dem;
     const count = n_rows * n_cols;
-    const need = headerEnd + ((count + 7) >> 3) + count * 2;
+    const demBlockLen = ((count + 7) >> 3) + count * 2;
+    const need = headerEnd + demBlockLen;
     if (container.length < need) {
       throw new Error("Ungültige Traxel-Datei: DEM-Block unvollständig.");
     }
@@ -225,6 +260,30 @@ export async function decodePayload(packed: Uint8Array): Promise<DecodedPayload>
       ...header.dem,
       elevations: decodeDemBlock(view, headerEnd, n_rows, n_cols),
     };
+    afterDemPos = headerEnd + demBlockLen;
+  }
+
+  // Chart-Block lesen.
+  const charts: ChartExportItem[] = [];
+  const chartMetas = header.charts as
+    | { name: string; placement: ChartPlacement; elevationM: number }[]
+    | null;
+  if (chartMetas && chartMetas.length > 0 && container.length >= afterDemPos + 2) {
+    const chartCount = view.getUint16(afterDemPos, true);
+    let p = afterDemPos + 2;
+    for (let i = 0; i < Math.min(chartCount, chartMetas.length); i++) {
+      if (p + 4 > container.length) break;
+      const pngLen = view.getUint32(p, true);
+      p += 4;
+      if (p + pngLen > container.length) break;
+      charts.push({
+        name: chartMetas[i].name,
+        placement: chartMetas[i].placement,
+        elevationM: chartMetas[i].elevationM,
+        pngBytes: container.slice(p, p + pngLen),
+      });
+      p += pngLen;
+    }
   }
 
   return {
@@ -233,5 +292,6 @@ export async function decodePayload(packed: Uint8Array): Promise<DecodedPayload>
     satellites: (header.satellites ?? null) as SatelliteData | null,
     derivation: (header.derivation ?? null) as Derivation | null,
     dem,
+    charts,
   };
 }

@@ -31,6 +31,10 @@ import { ColorLegend } from "./ColorLegend";
 import { SkyPlot } from "../viewer/SkyPlot";
 import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
+import { encodePayload } from "../pipeline/export/payload";
+import { bytesToBase64 } from "../pipeline/export/base64";
+import { assembleShareHtml } from "../share/assembleShareHtml";
+import shareViewerJs from "../../share-dist/share-viewer.js?raw";
 
 const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 
@@ -512,6 +516,39 @@ export default function App() {
     [],
   );
 
+  // Track + DEM + sichtbare Karten als selbstenthaltene HTML-Datei exportieren.
+  const handleExport = useCallback(async () => {
+    if (!displayTrack) return;
+    const chartItems = charts
+      .filter((c) => c.visible)
+      .map((c) => ({
+        name: c.name,
+        placement: c.placement,
+        elevationM: c.elevationM,
+        pngBytes: new Uint8Array(c.bytes),
+      }));
+    const packed = await encodePayload({
+      track: displayTrack,
+      satellites: displaySatellites,
+      derivation,
+      dem: activeDem,
+      charts: chartItems.length > 0 ? chartItems : null,
+    });
+    const b64 = bytesToBase64(packed);
+    const html = assembleShareHtml({
+      viewerJs: shareViewerJs,
+      payloadB64: b64,
+      title: displayTrack.meta.name,
+    });
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${displayTrack.meta.name.replace(/[/\\:*?"<>|]/g, "_")}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [displayTrack, displaySatellites, derivation, activeDem, charts]);
+
   // DEM-Effekte aktiv (AGL, Vorhang-Boden, Flug-Klassifikation) wenn Terrain
   // nicht ausgeschaltet; unabhaengig davon ob Topographie oder Satellit angezeigt.
   const activeDem = terrainView !== "off" ? dem : null;
@@ -698,6 +735,9 @@ export default function App() {
           </button>
           <button style={btnStyle} onClick={() => setLibraryOpen(true)} title="Bibliothek">
             📚 Bibliothek
+          </button>
+          <button style={btnStyle} onClick={() => void handleExport()} title="Als HTML-Datei exportieren">
+            ↓ Teilen
           </button>
         </div>
       )}

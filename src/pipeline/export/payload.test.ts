@@ -90,7 +90,7 @@ describe("encodePayload / decodePayload", () => {
     const packed = await encodePayload({ track, satellites, derivation });
     const out = await decodePayload(packed);
 
-    expect(out.version).toBe(1);
+    expect(out.version).toBe(2);
     expect(out.dem).toBeNull();
     expect(out.track).toEqual(track);
     expect(out.derivation).toEqual(derivation);
@@ -182,6 +182,39 @@ describe("encodePayload / decodePayload", () => {
     expect(Array.from(back)).toEqual(Array.from(packed));
     const out = await decodePayload(back);
     expect(out.track.meta.name).toBe("demo");
+  });
+
+  it("Chart-Roundtrip mit DEM (afterDemPos-Offset)", async () => {
+    const track = makeTrack();
+    const dem = makeDem(20, 25);
+    const placement = {
+      centerLon: 7.05,
+      centerLat: 47.05,
+      widthM: 500,
+      heightM: 400,
+      rotationDeg: 15,
+    };
+    // Minimale synthetische PNG-Bytes (kein gueltiges PNG — nur Byte-Identitaet zählt).
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03, 0xff]);
+    const chartItem = { name: "Platzrunde", placement, elevationM: 450.5, pngBytes };
+
+    const packed = await encodePayload({ track, dem, charts: [chartItem] });
+    const out = await decodePayload(packed);
+
+    expect(out.charts).toHaveLength(1);
+    expect(out.charts[0].name).toBe("Platzrunde");
+    expect(out.charts[0].elevationM).toBe(450.5);
+    expect(out.charts[0].placement).toEqual(placement);
+    expect(Array.from(out.charts[0].pngBytes)).toEqual(Array.from(pngBytes));
+    // DEM muss trotzdem korrekt sein (Offset-Arithmetik).
+    expect(out.dem).not.toBeNull();
+    expect(out.dem!.n_rows).toBe(20);
+    expect(out.dem!.n_cols).toBe(25);
+  });
+
+  it("leere Charts-Array wenn keine Karten übergeben", async () => {
+    const out = await decodePayload(await encodePayload({ track: makeTrack() }));
+    expect(out.charts).toEqual([]);
   });
 
   // Sanity-Check der "teilbar"-Annahme: wie gross wird der HTML-Blob wirklich?

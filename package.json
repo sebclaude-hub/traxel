@@ -7,7 +7,8 @@
   "description": "GPS track analyzer and visualizer — flights, road trips, hikes in 3D terrain",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:share": "vite build --config vite.share.config.ts",
+    "build": "npm run build:share && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

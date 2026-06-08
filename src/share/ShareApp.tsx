@@ -17,7 +17,8 @@ import { decodePayload, type DecodedPayload } from "../pipeline/export/payload";
 import { enrichTrackWithTerrain, suggestDemOffset } from "../pipeline/terrain";
 import type { ColorMode } from "../types";
 import { ColorLegend } from "../ui/ColorLegend";
-import { TrackViewer } from "../viewer/TrackViewer";
+import { placementToCorners } from "../viewer/chartPlacement";
+import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 
 const Z_SCALE = 3;
 
@@ -51,6 +52,20 @@ const rowStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
 };
+
+// PNG dekodieren mit 1px transparentem Rand: bei gedrehten Karten liegen
+// Mesh-Vertices auch ausserhalb des Rechtecks; clamp-to-edge gibt transparent.
+async function decodePaddedImage(src: Blob): Promise<ImageBitmap> {
+  const original = await createImageBitmap(src);
+  const pad = 1;
+  const cv = document.createElement("canvas");
+  cv.width = original.width + pad * 2;
+  cv.height = original.height + pad * 2;
+  cv.getContext("2d")!.drawImage(original, pad, pad);
+  const image = await createImageBitmap(cv);
+  original.close();
+  return image;
+}
 
 export function ShareApp({ payloadB64 }: { payloadB64: string }) {
   const [decoded, setDecoded] = useState<DecodedPayload | null>(null);
@@ -91,6 +106,44 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
     () => (track && dem ? enrichTrackWithTerrain(track, dem, zOffset) : track),
     [track, dem, zOffset],
   );
+
+  // Chart-PNG-Bytes → ImageBitmap (mit 1px Rand).
+  const [chartImages, setChartImages] = useState<ImageBitmap[]>([]);
+  useEffect(() => {
+    const charts = decoded?.charts;
+    if (!charts || charts.length === 0) {
+      setChartImages([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      charts.map((c) => decodePaddedImage(new Blob([c.pngBytes], { type: "image/png" }))),
+    ).then((imgs) => {
+      if (!cancelled) setChartImages(imgs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [decoded]);
+
+  const placedCharts = useMemo<PlacedChart[]>(() => {
+    const charts = decoded?.charts;
+    if (!charts || charts.length === 0 || chartImages.length === 0) return [];
+    return charts
+      .map((c, i) =>
+        chartImages[i]
+          ? {
+              overlay: {
+                name: c.name,
+                ...placementToCorners(c.placement),
+                elevation_m: c.elevationM,
+              },
+              image: chartImages[i],
+            }
+          : null,
+      )
+      .filter((x): x is PlacedChart => x !== null);
+  }, [decoded, chartImages]);
 
   if (error) return <div style={centeredStyle}>Fehler beim Laden: {error}</div>;
   if (!decoded || !displayTrack) return <div style={centeredStyle}>Lädt…</div>;
@@ -138,6 +191,7 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
         zScale={Z_SCALE}
         zOffset={zOffset}
         showTerrain={!!dem}
+        charts={placedCharts}
       />
 
       {/* Kopfzeile */}
