@@ -39,10 +39,10 @@ async function pump(
 
 /** gzip-komprimiert ein Uint8Array. */
 export function gzip(bytes: Uint8Array): Promise<Uint8Array> {
-  return pump(bytes, new CompressionStream("gzip"));
+  return pump(bytes, new CompressionStream("gzip") as unknown as TransformStream<Uint8Array, Uint8Array>);
 }
 
 /** Dekomprimiert ein gzip-Uint8Array. */
 export function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  return pump(bytes, new DecompressionStream("gzip"));
+  return pump(bytes, new DecompressionStream("gzip") as unknown as TransformStream<Uint8Array, Uint8Array>);
 }

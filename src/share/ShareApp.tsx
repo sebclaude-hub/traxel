@@ -117,7 +117,7 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
     }
     let cancelled = false;
     Promise.all(
-      charts.map((c) => decodePaddedImage(new Blob([c.pngBytes], { type: "image/png" }))),
+      charts.map((c) => decodePaddedImage(new Blob([c.pngBytes as Uint8Array<ArrayBuffer>], { type: "image/png" }))),
     ).then((imgs) => {
       if (!cancelled) setChartImages(imgs);
     });
@@ -130,7 +130,7 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
     const charts = decoded?.charts;
     if (!charts || charts.length === 0 || chartImages.length === 0) return [];
     return charts
-      .map((c, i) =>
+      .map((c, i): PlacedChart | null =>
         chartImages[i]
           ? {
               overlay: {
@@ -138,7 +138,7 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
                 ...placementToCorners(c.placement),
                 elevation_m: c.elevationM,
               },
-              image: chartImages[i],
+              image: chartImages[i] as ImageBitmap,
             }
           : null,
       )

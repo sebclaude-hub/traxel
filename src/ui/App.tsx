@@ -34,7 +34,16 @@ import { usePipeline } from "./usePipeline";
 import { encodePayload } from "../pipeline/export/payload";
 import { bytesToBase64 } from "../pipeline/export/base64";
 import { assembleShareHtml } from "../share/assembleShareHtml";
-import shareViewerJs from "../../share-dist/share-viewer.js?raw";
+// Im Dev-Server fehlt share-dist/ (erst nach npm run build:share vorhanden).
+// Dynamischer Import verhindert, dass ein fehlender Share-Build die App bricht.
+const getShareViewerJs = (): Promise<string> =>
+  import("../../share-dist/share-viewer.js?raw")
+    .then((m) => m.default as string)
+    .catch(() => {
+      throw new Error(
+        "Share-Bundle fehlt. Bitte einmal 'npm run build:share' ausführen.",
+      );
+    });
 
 const Z_OPTIONS = [1, 2, 3, 5, 7.5, 10];
 
@@ -516,9 +525,14 @@ export default function App() {
     [],
   );
 
+  // DEM-Effekte aktiv (AGL, Vorhang-Boden, Flug-Klassifikation) wenn Terrain
+  // nicht ausgeschaltet; unabhaengig davon ob Topographie oder Satellit angezeigt.
+  const activeDem = terrainView !== "off" ? dem : null;
+
   // Track + DEM + sichtbare Karten als selbstenthaltene HTML-Datei exportieren.
   const handleExport = useCallback(async () => {
     if (!displayTrack) return;
+    const viewerJs = await getShareViewerJs();
     const chartItems = charts
       .filter((c) => c.visible)
       .map((c) => ({
@@ -536,7 +550,7 @@ export default function App() {
     });
     const b64 = bytesToBase64(packed);
     const html = assembleShareHtml({
-      viewerJs: shareViewerJs,
+      viewerJs,
       payloadB64: b64,
       title: displayTrack.meta.name,
     });
@@ -548,10 +562,6 @@ export default function App() {
     a.click();
     URL.revokeObjectURL(url);
   }, [displayTrack, displaySatellites, derivation, activeDem, charts]);
-
-  // DEM-Effekte aktiv (AGL, Vorhang-Boden, Flug-Klassifikation) wenn Terrain
-  // nicht ausgeschaltet; unabhaengig davon ob Topographie oder Satellit angezeigt.
-  const activeDem = terrainView !== "off" ? dem : null;
 
   // Track mit Terrain anreichern (above_terrain, track_mode). demOffset
   // korrigiert den Geoid-/Ellipsoid-Versatz beim AGL-Vergleich.

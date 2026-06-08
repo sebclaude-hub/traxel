@@ -6,7 +6,8 @@
 // Rotation im Uhrzeigersinn (0° = Nord oben, achsenparallel).
 // ---------------------------------------------------------------------------
 
-export type { ChartPlacement } from "../types";
+import type { ChartPlacement } from "../types";
+export type { ChartPlacement };
 
 export interface ChartCorners {
   corner_tl: [number, number];

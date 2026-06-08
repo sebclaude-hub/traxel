@@ -352,49 +352,49 @@ export function TrackViewer({
           }),
         );
         const d = accelDecomp[i];
-        if (d) {
-          const mPerDegLon = 111320 * Math.cos((lat * Math.PI) / 180);
-          const target = (oe: number, on: number, ou: number): [number, number, number] => [
-            lon + oe / mPerDegLon,
-            lat + on / 111320,
-            z + ou * zScale,
-          ];
-          const he = d.headingE;
-          const hn = d.headingN;
-          const S = ARROW_M_PER_MS2;
-          const arrows = [
-            { color: COL_LONG, target: target(d.long * S * he, d.long * S * hn, 0) },
-            { color: COL_LAT, target: target(d.lateral * S * -hn, d.lateral * S * he, 0) },
-            { color: COL_VERT, target: target(0, 0, d.vertical * S) },
-          ];
-          result.push(
-            new LineLayer<{ color: Rgba; target: [number, number, number] }>({
-              id: "accel-arrows",
-              data: arrows,
-              getSourcePosition: () => [lon, lat, z],
-              getTargetPosition: (a) => a.target,
-              getColor: (a) => a.color,
-              getWidth: 3,
-              widthUnits: "pixels",
-              pickable: false,
-              parameters: { depthCompare: "always" },
-              updateTriggers: { getSourcePosition: [i, zScale, altBase], getTargetPosition: [i, zScale, accelDecomp] },
-            }),
-          );
-          result.push(
-            new ScatterplotLayer<{ color: Rgba; target: [number, number, number] }>({
-              id: "accel-tips",
-              data: arrows,
-              getPosition: (a) => a.target,
-              getRadius: 4,
-              radiusUnits: "pixels",
-              getFillColor: (a) => a.color,
-              pickable: false,
-              parameters: { depthCompare: "always" },
-              updateTriggers: { getPosition: [i, zScale, accelDecomp] },
-            }),
-          );
-        }
+        const mPerDegLon = 111320 * Math.cos((lat * Math.PI) / 180);
+        const target = (oe: number, on: number, ou: number): [number, number, number] => [
+          lon + oe / mPerDegLon,
+          lat + on / 111320,
+          z + ou * zScale,
+        ];
+        // Pfeile immer als Array fester Laenge — leeres Array wenn kein Wert,
+        // damit deck.gl den Layer updaten kann statt ihn zu zerstoeren/neu anlegen.
+        const S = ARROW_M_PER_MS2;
+        const arrows: { color: Rgba; target: [number, number, number] }[] = d
+          ? [
+              { color: COL_LONG, target: target(d.long * S * d.headingE, d.long * S * d.headingN, 0) },
+              { color: COL_LAT, target: target(d.lateral * S * -d.headingN, d.lateral * S * d.headingE, 0) },
+              { color: COL_VERT, target: target(0, 0, d.vertical * S) },
+            ]
+          : [];
+        result.push(
+          new LineLayer<{ color: Rgba; target: [number, number, number] }>({
+            id: "accel-arrows",
+            data: arrows,
+            getSourcePosition: () => [lon, lat, z],
+            getTargetPosition: (a) => a.target,
+            getColor: (a) => a.color,
+            getWidth: 3,
+            widthUnits: "pixels",
+            pickable: false,
+            parameters: { depthCompare: "always" },
+            updateTriggers: { getSourcePosition: [i, zScale, altBase], getTargetPosition: [i, zScale, accelDecomp] },
+          }),
+        );
+        result.push(
+          new ScatterplotLayer<{ color: Rgba; target: [number, number, number] }>({
+            id: "accel-tips",
+            data: arrows,
+            getPosition: (a) => a.target,
+            getRadius: 4,
+            radiusUnits: "pixels",
+            getFillColor: (a) => a.color,
+            pickable: false,
+            parameters: { depthCompare: "always" },
+            updateTriggers: { getPosition: [i, zScale, accelDecomp] },
+          }),
+        );
       }
     }
 
