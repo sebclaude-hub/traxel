@@ -6,6 +6,7 @@ node_modules/
 
 # Build-Output
 dist/
+share-dist/
 
 # Lokale Daten und Cache
 data/
