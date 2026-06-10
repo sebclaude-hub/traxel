@@ -234,20 +234,26 @@ function toLocalEnu(points: GeoKinematicPoints): {
 }
 
 /**
- * Zentriertes gleitendes 3-Punkt-Mittel (null-sicher): mittelt je Punkt die
- * vorhandenen Werte aus {i−1, i, i+1}. Ein null-Mittelpunkt bleibt null (es
- * werden keine Werte erfunden). Bewusst nur 3 Punkte — staerkere Glaettung
- * verschmiert die kurzen Beschleunigungsereignisse (Kurveneingang/Bremspunkt),
- * die der G-Vektor gerade zeigen soll.
+ * Zentriertes gleitendes Mittel ueber ``window`` Punkte (ungerade Anzahl;
+ * ``<=1`` = keine Glaettung), null-sicher: je Punkt wird ueber die vorhandenen
+ * Werte im Fenster gemittelt. Ein null-Mittelpunkt bleibt null (es werden keine
+ * Werte erfunden). An den Raendern schrumpft das Fenster. Ein groesseres Fenster
+ * glaettet staerker, verschmiert aber die kurzen Beschleunigungsereignisse
+ * (Kurveneingang/Bremspunkt), die der G-Vektor gerade zeigen soll.
  */
-function movingAverage3(values: (number | null)[]): (number | null)[] {
+function movingAverage(
+  values: (number | null)[],
+  window: number,
+): (number | null)[] {
+  const r = Math.max(0, Math.floor((window - 1) / 2));
+  if (r === 0) return values.slice();
   const n = values.length;
   const out = new Array<number | null>(n).fill(null);
   for (let i = 0; i < n; i++) {
     if (values[i] === null || !Number.isFinite(values[i] as number)) continue;
     let sum = 0;
     let cnt = 0;
-    for (let j = Math.max(0, i - 1); j <= Math.min(n - 1, i + 1); j++) {
+    for (let j = Math.max(0, i - r); j <= Math.min(n - 1, i + r); j++) {
       const v = values[j];
       if (v !== null && Number.isFinite(v)) {
         sum += v;
@@ -264,21 +270,22 @@ function movingAverage3(values: (number | null)[]): (number | null)[] {
  * null, wo a nicht bestimmbar ist oder die Horizontalgeschwindigkeit zu klein
  * ist (Richtung unbestimmt). Ohne Hoehe faellt die Vertikalkomponente auf 0.
  *
- * `smooth` glaettet die Beschleunigungskomponenten (aE/aN/aU) mit einem
- * 3-Punkt-Mittel, bevor zerlegt wird — daempft das Funkeln aus der doppelten
- * Differentiation, ohne die Bewegungsrichtung (aus der 1. Ableitung) zu
- * veraendern. Die Richtungs-Einheitsvektoren bleiben ungeglaettet.
+ * `smoothWindow` (ungerade Punktzahl; 1 = keine Glaettung) glaettet die
+ * Beschleunigungskomponenten (aE/aN/aU) mit einem zentrierten gleitenden Mittel,
+ * bevor zerlegt wird — daempft das Funkeln aus der doppelten Differentiation,
+ * ohne die Bewegungsrichtung (aus der 1. Ableitung) zu veraendern. Die
+ * Richtungs-Einheitsvektoren bleiben ungeglaettet.
  */
 export function decomposeAcceleration(
   points: GeoKinematicPoints,
-  { smooth = false }: { smooth?: boolean } = {},
+  { smoothWindow = 1 }: { smoothWindow?: number } = {},
 ): (AccelDecomp | null)[] {
   const ts = points.timestamp_ms;
   const n = points.lat.length;
   const { east, north, up } = toLocalEnu(points);
 
   // Geschwindigkeit (zentrale Differenz der Position), dann Beschleunigung
-  // (zentrale Differenz der Geschwindigkeit). Optional 3-Punkt-Glaettung der
+  // (zentrale Differenz der Geschwindigkeit). Optionale Glaettung der
   // Beschleunigung gegen das Funkeln der doppelten Ableitung.
   const vE = centralTimeDerivative(east, ts);
   const vN = centralTimeDerivative(north, ts);
@@ -286,10 +293,10 @@ export function decomposeAcceleration(
   let aE = centralTimeDerivative(vE, ts);
   let aN = centralTimeDerivative(vN, ts);
   let aU = centralTimeDerivative(vU, ts);
-  if (smooth) {
-    aE = movingAverage3(aE);
-    aN = movingAverage3(aN);
-    aU = movingAverage3(aU);
+  if (smoothWindow > 1) {
+    aE = movingAverage(aE, smoothWindow);
+    aN = movingAverage(aN, smoothWindow);
+    aU = movingAverage(aU, smoothWindow);
   }
 
   const out: (AccelDecomp | null)[] = new Array(n).fill(null);

@@ -210,15 +210,17 @@ describe("decomposeAcceleration", () => {
     const peak = (ds: (AccelDecomp | null)[]) =>
       Math.max(...ds.map((d) => (d ? Math.abs(d.lateral) : 0)));
     const raw = peak(decomposeAcceleration(pts));
-    const smoothed = peak(decomposeAcceleration(pts, { smooth: true }));
-    expect(smoothed).toBeLessThan(raw); // 3-Punkt-Mittel senkt die Spitze
+    const smoothed3 = peak(decomposeAcceleration(pts, { smoothWindow: 3 }));
+    const smoothed5 = peak(decomposeAcceleration(pts, { smoothWindow: 5 }));
+    expect(smoothed3).toBeLessThan(raw); // 3-Punkt-Mittel senkt die Spitze
+    expect(smoothed5).toBeLessThan(smoothed3); // groesseres Fenster senkt sie weiter
   });
 
   it("laesst gleichmaessige Beschleunigung unveraendert (Konstante bleibt konstant)", () => {
     // x = t² → a = 2 m/s² ueberall; ein gleitendes Mittel einer Konstanten
     // gibt dieselbe Konstante zurueck.
     const xy: [number, number][] = Array.from({ length: 9 }, (_v, k) => [k * k, 0]);
-    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)), { smooth: true })[4]!;
+    const d = decomposeAcceleration(geo(xy, xy.map(() => 100)), { smoothWindow: 3 })[4]!;
     expect(d.long).toBeCloseTo(2, 5);
     expect(Math.abs(d.lateral)).toBeLessThan(0.02);
   });

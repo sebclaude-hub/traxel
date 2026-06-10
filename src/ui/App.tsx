@@ -129,6 +129,9 @@ export default function App() {
   const [showCurtain, setShowCurtain] = useState(true);
   // G-Vektor: 3D-Beschleunigungspfeile (laengs/quer/vertikal) am aktiven Punkt.
   const [showAccel, setShowAccel] = useState(false);
+  // Glaettungsfenster (Punkte) fuer die G-Vektor-Zerlegung. 1 = keine Glaettung,
+  // 3 = 3-Punkt usw. Daempft das Funkeln der doppelten Differentiation.
+  const [accelSmoothWindow, setAccelSmoothWindow] = useState(3);
   // Wiedergabe: zaehlt den aktiven Punkt automatisch hoch (Anzeigedauer pro
   // Punkt, NICHT die echte Track-Zeit).
   const [playing, setPlaying] = useState(false);
@@ -631,9 +634,9 @@ export default function App() {
   const accelDecomp = useMemo(
     () =>
       accelActive && viewTrack
-        ? decomposeAcceleration(viewTrack.points, { smooth: true })
+        ? decomposeAcceleration(viewTrack.points, { smoothWindow: accelSmoothWindow })
         : null,
-    [accelActive, viewTrack],
+    [accelActive, viewTrack, accelSmoothWindow],
   );
 
   // Wiedergabe: aktiven Punkt im gewaehlten Takt hochzaehlen (mit Schleife).
@@ -866,6 +869,18 @@ export default function App() {
                     [false, "aus"],
                   ]}
                   onChange={setShowAccel}
+                />
+              )}
+              {showAccel && !compareTrack && (
+                <Segmented<string>
+                  value={String(accelSmoothWindow)}
+                  options={[
+                    ["1", "Glättung aus", "Rohe doppelte Ableitung — funkelt stark."],
+                    ["3", "3 Pkt", "3-Punkt-Mittel (Standard) — dämpft das Funkeln, erhält kurze Ereignisse."],
+                    ["5", "5 Pkt", "5-Punkt-Mittel — glatter, verschmiert kurze Spitzen etwas."],
+                    ["7", "7 Pkt", "7-Punkt-Mittel — am glattesten, träge bei Kurveneingang/Bremspunkt."],
+                  ]}
+                  onChange={(v) => setAccelSmoothWindow(Number(v))}
                 />
               )}
               {dem && (
