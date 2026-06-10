@@ -23,6 +23,7 @@
 import type { SatelliteData, TrackData, TrackPoints } from "../../types";
 import { DEFAULT_QUANTILES } from "../constants";
 import { geodesicDistanceMeters } from "./geo";
+import { enrichKinematics } from "./kinematics";
 import { computeQuantileBreaks } from "./quantiles";
 
 export type CutMode = "trim" | "gap" | "bridge";
@@ -222,6 +223,10 @@ export function applyCuts(
   const speedQ = computeQuantileBreaks(speed, DEFAULT_QUANTILES);
   const altQ = computeQuantileBreaks(alt, DEFAULT_QUANTILES);
 
+  // Kinematik NEU rechnen (nicht mitschneiden): an den Schnittkanten andere
+  // Nachbarn, bei bridge-Cuts verschobene Zeitstempel → analog zu den Quantilen.
+  const kin = enrichKinematics({ alt, speed_kmh: speed, timestamp_ms: timestampMs });
+
   const newPoints: TrackPoints = {
     lat,
     lon,
@@ -234,6 +239,7 @@ export function applyCuts(
     speed_q_idx: speedQ.qIdx,
     alt_q_idx: altQ.qIdx,
     is_bridged: idx.map((i) => isBridged[i]),
+    ...kin,
   };
 
   const m = idx.length;

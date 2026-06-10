@@ -126,6 +126,43 @@ export function computeEnergyRate(points: KinematicPoints): (number | null)[] {
   return centralTimeDerivative(energyHeight(points), points.timestamp_ms);
 }
 
+/** Vorberechnete skalare Kinematik-Spalten (gehoeren in `TrackPoints`). */
+export interface KinematicColumns {
+  /** 3D-Geschwindigkeit v3D (m/s) pro Punkt. */
+  speed3d_ms: (number | null)[];
+  /** Tangential-Beschleunigung a = d(v3D)/dt (m/s², vorzeichenbehaftet). */
+  accel_tangential: (number | null)[];
+  /** Spezifische Energie als Hoehenaequivalent H = h + v3D²/(2g) (m). */
+  energy_height_m: (number | null)[];
+  /** Energieaenderungsrate dH/dt (m/s, vorzeichenbehaftet). */
+  energy_rate: (number | null)[];
+}
+
+/**
+ * Rechnet die skalaren Kinematik-Spalten EINMAL aus den Roh-Punkten und gibt sie
+ * als fertige Per-Punkt-Arrays zurueck — analog zur Python-Pipeline
+ * (gps_pipeline/processing/kinematics.py): die Pipeline rechnet, der Viewer mappt
+ * nur noch auf Farbe. v3D wird einmal berechnet und fuer Beschleunigung und
+ * Energie wiederverwendet.
+ *
+ * Muss ueberall dort aufgerufen werden, wo die Punkt-Arrays neu entstehen ODER
+ * sich Zeitstempel/Nachbarschaften aendern (buildTrackData beim Bau, applyCuts
+ * nach dem Schneiden) — analog zu computeQuantileBreaks; ein blosses Mitschneiden
+ * waere an den Schnittkanten falsch (zentrale Differenz gegen entfernten Nachbarn).
+ */
+export function enrichKinematics(cols: KinematicPoints): KinematicColumns {
+  const v3 = speed3D(cols);
+  const accel = centralTimeDerivative(v3, cols.timestamp_ms);
+  const eh = energyHeight(cols);
+  const er = centralTimeDerivative(eh, cols.timestamp_ms);
+  return {
+    speed3d_ms: v3,
+    accel_tangential: accel,
+    energy_height_m: eh,
+    energy_rate: er,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 3D-Beschleunigungsvektor + Zerlegung (laengs/quer/vertikal).
 //

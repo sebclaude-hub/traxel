@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TrackData } from "../types";
+import { enrichKinematics } from "../pipeline/processing/kinematics";
 import { computeQuantileBreaks } from "../pipeline/processing/quantiles";
 import { combinedBreaks, colorScaleFor } from "./colorScale";
 
@@ -36,6 +37,7 @@ function track(speed: (number | null)[]): TrackData {
       timestamp_ms: zeros,
       speed_q_idx: zeros,
       alt_q_idx: zeros,
+      ...enrichKinematics({ alt: zeros, speed_kmh: speed, timestamp_ms: zeros }),
     },
   };
 }

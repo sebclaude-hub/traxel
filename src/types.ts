@@ -43,10 +43,15 @@ export interface QuantileBreaks {
 
 // "altitude" = Hoehe ueber MSL (faerbt nach alt); "altitude_gnd" = Hoehe ueber
 // Grund (faerbt nach above_terrain, nur mit Terrain verfuegbar).
-// "energy" = spezifische Energiehoehe H = h + v²/(2g) (vorzeichenlos);
-// "energy_rate" = dH/dt (vorzeichenbehaftet, wie accel gefaerbt).
+// "speed" = GPS-Grundgeschwindigkeit (SOG, 2D, horizontal);
+// "speed3d" = 3D-Geschwindigkeit v3D = √(v_h² + v_z²) (mit Vertikalrate) — die
+//   Basis der Tangential-Beschleunigung (a = d(v3D)/dt), daher im Selektor direkt
+//   vor "accel" platziert.
+// "energy" = spezifische Energie als Hoehenaequivalent H = h + v²/(2g)
+// (vorzeichenlos); "energy_rate" = dH/dt (vorzeichenbehaftet, wie accel gefaerbt).
 export type ColorMode =
   | "speed"
+  | "speed3d"
   | "altitude"
   | "altitude_gnd"
   | "flight"
@@ -68,6 +73,20 @@ export interface TrackPoints {
   speed_q_idx: number[];
   /** Quantilklasse 0..n-1 der Hoehe pro Punkt; -1 = ohne Wert. */
   alt_q_idx: number[];
+  // --- Abgeleitete Kinematik (Pipeline rechnet, Viewer mappt nur auf Farbe) ---
+  // In der Pipeline vorberechnet (buildTrackData) und bei Cuts neu gerechnet
+  // (applyCuts) — NICHT bloss mitgeschnitten. Im Share-Payload gestrippt und beim
+  // Decode per ensureKinematics nachgerechnet (Datei klein halten). Der Viewer
+  // setzt sie als vorhanden voraus; an den Eintrittspunkten (Worker/Decode) wird
+  // das garantiert. Siehe pipeline/processing/kinematics.ts → enrichKinematics.
+  /** 3D-Geschwindigkeit v3D = √(v_h² + v_z²) (m/s). */
+  speed3d_ms: (number | null)[];
+  /** Tangential-Beschleunigung a = d(v3D)/dt (m/s², vorzeichenbehaftet). */
+  accel_tangential: (number | null)[];
+  /** Spezifische Energie als Hoehenaequivalent H = h + v3D²/(2g) (m). */
+  energy_height_m: (number | null)[];
+  /** Energieaenderungsrate dH/dt (m/s, vorzeichenbehaftet). */
+  energy_rate: (number | null)[];
   /** True, wenn der Zeitstempel dieses Punktes durch einen bridge-Cut
    *  (Ueberbruecken) nach vorne verschoben wurde (Pro-Punkt-Hinweis).
    *  Fehlt = ueberall false. */

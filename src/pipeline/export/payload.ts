@@ -32,6 +32,7 @@
 
 import type { ChartPlacement, DemGrid, SatelliteData, TrackData } from "../../types";
 import type { Derivation } from "../processing/cuts";
+import { stripKinematics } from "../processing/track-model";
 import { gunzip, gzip } from "./gzip";
 
 const MAGIC = "TRXL"; // 4 ASCII-Bytes
@@ -154,8 +155,14 @@ export async function encodePayload(input: ExportInput): Promise<Uint8Array> {
   const charts = input.charts ?? [];
 
   // JSON-Kopf: alles ausser den DEM-Hoehen und PNG-Bytes (die kommen als Binaerbloecke).
+  // Abgeleitete Kinematik wird gestrippt (reproduzierbar) → kleinere Datei; der
+  // Share-Viewer rechnet sie beim Laden per ensureKinematics nach.
+  const leanTrack: TrackData = {
+    ...input.track,
+    points: stripKinematics(input.track.points),
+  };
   const headerData = {
-    track: input.track,
+    track: leanTrack,
     satellites: input.satellites ?? null,
     derivation: input.derivation ?? null,
     dem: dem

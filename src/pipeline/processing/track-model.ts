@@ -17,6 +17,7 @@ import type {
 } from "../../types";
 import { DEFAULT_QUANTILES } from "../constants";
 import type { EnrichedTrackPoint } from "../types";
+import { enrichKinematics } from "./kinematics";
 import { computeQuantileBreaks } from "./quantiles";
 
 export interface BuildTrackDataOptions {
@@ -66,6 +67,10 @@ export function buildTrackData(
   const speedQ = computeQuantileBreaks(speed, nQuantiles);
   const altQ = computeQuantileBreaks(alt, nQuantiles);
 
+  // Abgeleitete Kinematik aus denselben (gerundeten) Spalten, die der Viewer
+  // sonst lesen wuerde — einmal hier, statt bei jedem Moduswechsel im Viewer.
+  const kin = enrichKinematics({ alt, speed_kmh: speed, timestamp_ms: timestampMs });
+
   const trackPoints: TrackPoints = {
     lat,
     lon,
@@ -77,6 +82,7 @@ export function buildTrackData(
     timestamp_ms: timestampMs,
     speed_q_idx: speedQ.qIdx,
     alt_q_idx: altQ.qIdx,
+    ...kin,
   };
 
   // Meta
@@ -129,4 +135,40 @@ export function buildTrackData(
     },
     points: trackPoints,
   };
+}
+
+/** Schluessel der abgeleiteten Kinematik-Spalten (eine Quelle der Wahrheit). */
+const KINEMATIC_KEYS = [
+  "speed3d_ms",
+  "accel_tangential",
+  "energy_height_m",
+  "energy_rate",
+] as const;
+
+/**
+ * Garantiert, dass die abgeleiteten Kinematik-Spalten vorhanden sind. Fehlen sie
+ * (z.B. aus einem aelteren oder bewusst gestrippten Share-Payload), werden sie
+ * nachgerechnet. Der Viewer setzt ihre Existenz voraus → an Eintrittspunkten
+ * (Worker liefert sie bereits; Share-Decode ruft dies) aufrufen.
+ */
+export function ensureKinematics(track: TrackData): TrackData {
+  if (track.points.accel_tangential) return track;
+  const p = track.points;
+  const kin = enrichKinematics({
+    alt: p.alt,
+    speed_kmh: p.speed_kmh,
+    timestamp_ms: p.timestamp_ms,
+  });
+  return { ...track, points: { ...p, ...kin } };
+}
+
+/**
+ * Entfernt die abgeleiteten Kinematik-Spalten — fuer den Share-Export, damit die
+ * HTML-Datei klein bleibt (sie sind reproduzierbar, ensureKinematics rechnet sie
+ * beim Laden nach).
+ */
+export function stripKinematics(points: TrackPoints): TrackPoints {
+  const copy = { ...points };
+  for (const k of KINEMATIC_KEYS) delete (copy as Record<string, unknown>)[k];
+  return copy;
 }

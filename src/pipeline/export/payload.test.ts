@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { DemGrid, SatelliteData, TrackData } from "../../types";
 import type { Derivation } from "../processing/cuts";
+import { enrichKinematics } from "../processing/kinematics";
+import { stripKinematics } from "../processing/track-model";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { gunzip } from "./gzip";
 import { decodePayload, encodePayload } from "./payload";
@@ -34,6 +36,11 @@ function makeTrack(n = 5): TrackData {
       speed_q_idx: Array.from({ length: n }, () => 0),
       alt_q_idx: Array.from({ length: n }, () => 0),
       is_bridged: Array.from({ length: n }, () => false),
+      ...enrichKinematics({
+        alt: Array.from({ length: n }, (_, i) => 100 + i),
+        speed_kmh: Array.from({ length: n }, () => 40),
+        timestamp_ms: Array.from({ length: n }, (_, i) => i * 1000),
+      }),
     },
   };
 }
@@ -92,7 +99,9 @@ describe("encodePayload / decodePayload", () => {
 
     expect(out.version).toBe(2);
     expect(out.dem).toBeNull();
-    expect(out.track).toEqual(track);
+    // Abgeleitete Kinematik wird beim Export gestrippt (reproduzierbar, der
+    // Share-Viewer rechnet sie per ensureKinematics nach) — der Rest reist 1:1.
+    expect(out.track).toEqual({ ...track, points: stripKinematics(track.points) });
     expect(out.derivation).toEqual(derivation);
     // Transparenz-Hinweis und Satellitendaten reisen mit — kein Stripping.
     expect(out.satellites).toEqual(satellites);

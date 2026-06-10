@@ -28,9 +28,10 @@ import { useMemo } from "react";
 
 const t = {
   speed: "Tempo",
+  speed3d: "v₃D (3D)",
   altitude: "Höhe (MSL)",
   altitudeGnd: "Höhe (GND)",
-  energy: "Energiehöhe",
+  energy: "Spezifische Energie",
   brakeLeft: "− Bremsen",
   accelRight: "Beschl. +",
   energyLoss: "− verliert",
@@ -136,6 +137,7 @@ export function ColorLegend({
   const grad = useMemo(() => {
     if (
       mode !== "speed" &&
+      mode !== "speed3d" &&
       mode !== "altitude" &&
       mode !== "altitude_gnd" &&
       mode !== "energy"
@@ -146,11 +148,13 @@ export function ColorLegend({
     const meta =
       mode === "speed"
         ? { title: t.speed, unit: "km/h" }
-        : mode === "altitude"
-          ? { title: t.altitude, unit: "m" }
-          : mode === "altitude_gnd"
-            ? { title: t.altitudeGnd, unit: "m" }
-            : { title: t.energy, unit: "m" };
+        : mode === "speed3d"
+          ? { title: t.speed3d, unit: "km/h" }
+          : mode === "altitude"
+            ? { title: t.altitude, unit: "m" }
+            : mode === "altitude_gnd"
+              ? { title: t.altitudeGnd, unit: "m" }
+              : { title: t.energy, unit: "m" };
     return { ...meta, breaks };
   }, [mode, track, breaksOverride]);
 

@@ -12,7 +12,6 @@
 
 import type { ColorMode, TrackData } from "../types";
 import { computeQuantileBreaks } from "../pipeline/processing/quantiles";
-import { energyHeight } from "./kinematics";
 
 export interface ColorScale {
   /** Rohwerte pro Punkt fuer den Modus (null → spaeter FALLBACK-Farbe). */
@@ -42,10 +41,18 @@ export function colorScaleFor(track: TrackData, mode: ColorMode): ColorScale {
     const values = track.points.above_terrain;
     return { values, breaks: computeQuantileBreaks(values).breaks };
   }
+  if (mode === "speed3d") {
+    // v3D ist physikalisch in m/s gespeichert; fuer die Anzeige in km/h (×3.6),
+    // damit dieselbe Werteachse wie die GPS-Geschwindigkeit (SOG) gilt.
+    const values = track.points.speed3d_ms.map((v) =>
+      v === null ? null : v * 3.6,
+    );
+    return { values, breaks: computeQuantileBreaks(values).breaks };
+  }
   if (mode === "energy") {
-    // Vorzeichenlose Energiehoehe → wie Hoehe/Tempo quantil-entzerrt. Werte werden
-    // viewer-seitig gerechnet, daher auch die Grenzen on-the-fly.
-    const values = energyHeight(track.points);
+    // Vorzeichenlose spezifische Energie → wie Hoehe/Tempo quantil-entzerrt.
+    // Werte in der Pipeline vorberechnet (TrackPoints), Grenzen on-the-fly.
+    const values = track.points.energy_height_m;
     return { values, breaks: computeQuantileBreaks(values).breaks };
   }
   // speed (Default; flight/drone/accel werden vom Aufrufer separat behandelt

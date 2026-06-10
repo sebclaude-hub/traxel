@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SatelliteData, TrackData } from "../../types";
 import { applyCuts } from "./cuts";
+import { enrichKinematics } from "./kinematics";
 
 /** Baut einen Track aus Punkt-Tupeln (ts in s, lon in Grad, speed km/h). */
 function makeTrack(
@@ -34,6 +35,11 @@ function makeTrack(
       timestamp_ms: pts.map((p) => p.tsS * 1000),
       speed_q_idx: pts.map(() => -1),
       alt_q_idx: pts.map(() => -1),
+      ...enrichKinematics({
+        alt: pts.map(() => 100),
+        speed_kmh: pts.map((p) => p.speedKmh),
+        timestamp_ms: pts.map((p) => p.tsS * 1000),
+      }),
     },
   };
 }

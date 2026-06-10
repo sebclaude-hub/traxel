@@ -6,13 +6,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
-import { applyCuts, type CutMode, type CutSpec } from "../pipeline";
+import { applyCuts, type CutSpec } from "../pipeline";
+import { HelpModal } from "./HelpModal";
+import { RangeSelector } from "./RangeSelector";
+import { useRangeSelection } from "./useRangeSelection";
 import { enrichTrackWithTerrain, suggestDemOffset } from "../pipeline/terrain";
 import type { SatelliteImage } from "../pipeline/terrain/satellite";
 import { TrackViewer, type PlacedChart } from "../viewer/TrackViewer";
 import { placementToCorners, type ChartPlacement } from "../viewer/chartPlacement";
 import { combinedBreaks } from "../viewer/colorScale";
-import { decomposeAcceleration, type AccelDecomp } from "../viewer/kinematics";
+import { decomposeAcceleration, type AccelDecomp } from "../pipeline/processing/kinematics";
 import { cornersToBounds, unionBounds } from "../library/spatial";
 import {
   getChartRecord,
@@ -98,6 +101,11 @@ async function decodePaddedImage(src: Blob): Promise<ImageBitmap> {
   return image;
 }
 
+/** Laeuft die App in der Tauri-Desktop-Huelle (statt im Browser/PWA)? Nur dann
+ *  gibt es ein Fenster-API zum Schliessen. */
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 export default function App() {
   const { loadTrackText, loadTerrain, loadSatellite } = usePipeline();
   const [track, setTrack] = useState<TrackData | null>(null);
@@ -113,6 +121,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  // Kurzlebige Statusmeldung (z.B. nach dem Export). Auto-Ausblenden via Effekt.
+  const [toast, setToast] = useState<string | null>(null);
 
   const [colorMode, setColorMode] = useState<ColorMode>("speed");
   const [showCurtain, setShowCurtain] = useState(true);
@@ -142,11 +153,13 @@ export default function App() {
     setPlaying(false); // Wiedergabe bei Trackwechsel stoppen
   }, [track]);
 
-  // Cuts (gegen die Original-Track-Indizes) + Formularzustand.
-  const [cuts, setCuts] = useState<CutSpec[]>([]);
-  const [cutStart, setCutStart] = useState(0);
-  const [cutEnd, setCutEnd] = useState(0);
-  const [cutMode, setCutMode] = useState<CutMode>("trim");
+  // Cuts (gegen die Original-Track-Indizes) via visuelle Cut-Leiste
+  // (RangeSelector). Die Ranges werden als CutSpec[] an applyCuts gereicht.
+  const rangeApi = useRangeSelection();
+  const cuts = useMemo<CutSpec[]>(
+    () => rangeApi.ranges.map((r) => ({ start: r.start, end: r.end, mode: r.mode })),
+    [rangeApi.ranges],
+  );
 
   // Karten-Overlays (Anflugkarten).
   const [charts, setCharts] = useState<AppChart[]>([]);
@@ -233,7 +246,7 @@ export default function App() {
     setTrack(td);
     setSatellites(sat);
     setCompareTrack(null); // neuer Haupttrack → bestehenden Vergleich verwerfen
-    setCuts([]);
+    rangeApi.clearAll();
     setCharts([]);
     setEditChartId(null);
     setSatelliteImage(null);
@@ -554,14 +567,30 @@ export default function App() {
       payloadB64: b64,
       title: displayTrack.meta.name,
     });
+    const fileName = `${displayTrack.meta.name.replace(/[/\\:*?"<>|]/g, "_")}.html`;
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${displayTrack.meta.name.replace(/[/\\:*?"<>|]/g, "_")}.html`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
+    // Rueckmeldung: der Download laeuft sonst sichtbar ins Leere (Backlog #7).
+    setToast(`Gespeichert als ${fileName} im Downloads-Ordner.`);
   }, [displayTrack, displaySatellites, derivation, activeDem, charts]);
+
+  // Beenden — nur in der Tauri-Desktop-Huelle (im Browser kein Fenster-API).
+  const handleQuit = useCallback(async () => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+  }, []);
+
+  // Toast nach kurzer Zeit selbst ausblenden.
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   // Track mit Terrain anreichern (above_terrain, track_mode). demOffset
   // korrigiert den Geoid-/Ellipsoid-Versatz beim AGL-Vergleich.
@@ -671,16 +700,18 @@ export default function App() {
         ["altitude_gnd", "Höhe GND"],
         ["flight", "Flug"],
         ["drone", "Drohne"],
+        ["speed3d", "v₃D"],
         ["accel", "Beschl."],
-        ["energy", "Energie"],
-        ["energy_rate", "ΔEnergie"],
+        ["energy", "Spez. Energie"],
+        ["energy_rate", "Energierate"],
       ]
     : [
         ["speed", "Geschwindigkeit"],
         ["altitude", "Höhe MSL"],
+        ["speed3d", "v₃D"],
         ["accel", "Beschl."],
-        ["energy", "Energie"],
-        ["energy_rate", "ΔEnergie"],
+        ["energy", "Spez. Energie"],
+        ["energy_rate", "Energierate"],
       ];
 
   return (
@@ -746,9 +777,17 @@ export default function App() {
           <button style={btnStyle} onClick={() => setLibraryOpen(true)} title="Bibliothek">
             📚 Bibliothek
           </button>
+          <button style={btnStyle} onClick={() => setHelpOpen(true)} title="Erklärung der berechneten Größen">
+            ?
+          </button>
           <button style={btnStyle} onClick={() => void handleExport()} title="Als HTML-Datei exportieren">
             ↓ Teilen
           </button>
+          {isTauri && (
+            <button style={btnStyle} onClick={() => void handleQuit()} title="Traxel beenden">
+              ⏻ Beenden
+            </button>
+          )}
         </div>
       )}
 
@@ -791,6 +830,10 @@ export default function App() {
               accelDecomp={accelDecomp}
               activeIdx={safeIdx}
               showAccelArrows={accelActive}
+              onPointClick={(_, idx) => {
+                setPlaying(false); // Wiedergabe stoppen, sonst laeuft der Punkt sofort weiter
+                setActiveIdx(idx);
+              }}
             />
             <div style={togglesStyle}>
               <Segmented<ColorMode>
@@ -887,65 +930,13 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Cut-Werkzeug: Bereich (Original-Indizes) + Modus → Schneiden. */}
+              {/* Cut-Werkzeug: visuelle Cut-Leiste unten am Playback-Slider
+                  (RangeSelector). Hier im Seitenpanel nur ein kurzer Hinweis. */}
               {track && (
                 <div style={cutBoxStyle}>
                   <div style={{ color: "#888", fontSize: 11 }}>
-                    Schnitt (Index 0–{track.meta.n_points - 1})
-                  </div>
-                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                    <input
-                      type="number"
-                      min={0}
-                      max={track.meta.n_points - 1}
-                      value={cutStart}
-                      onChange={(e) => setCutStart(Number(e.target.value))}
-                      style={numStyle}
-                    />
-                    <span style={{ color: "#888" }}>–</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={track.meta.n_points - 1}
-                      value={cutEnd}
-                      onChange={(e) => setCutEnd(Number(e.target.value))}
-                      style={numStyle}
-                    />
-                  </div>
-                  <Segmented<CutMode>
-                    value={cutMode}
-                    options={[
-                      ["trim", "Trim", "Entfernt Punkte am Rand. Zeit unverändert."],
-                      [
-                        "gap",
-                        "Lücke",
-                        "Entfernt das Stück, behält aber die Zeit → sichtbare Lücke / niedrige Geschwindigkeit. Gesamtzeit bleibt original.",
-                      ],
-                      [
-                        "bridge",
-                        "Überbrücken",
-                        "Entfernt das Stück und schließt die Zeitlücke (plausible Durchfahrt statt Pause) → reine Bewegungszeit. Die Satellitenkonstellation ab hier entspricht nicht mehr der echten Zeit.",
-                      ],
-                    ]}
-                    onChange={setCutMode}
-                  />
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <button
-                      style={btnStyle}
-                      onClick={() =>
-                        setCuts((cs) => [
-                          ...cs,
-                          { start: cutStart, end: cutEnd, mode: cutMode },
-                        ])
-                      }
-                    >
-                      Schneiden
-                    </button>
-                    {cuts.length > 0 && (
-                      <button style={btnStyle} onClick={() => setCuts([])}>
-                        Zurücksetzen ({cuts.length})
-                      </button>
-                    )}
+                    Schnitte: „+ Cut"-Leiste unten — Bereiche ziehen, Modus per
+                    Schalter (Lücke ↔ Zeit verschieben).
                   </div>
                 </div>
               )}
@@ -1010,6 +1001,16 @@ export default function App() {
         )}
       </div>
 
+      {/* Cut-Leiste: Index-Raum des ORIGINAL-Tracks (Cuts laufen gegen
+          Original-Indizes). Im Vergleich deaktiviert (Cuts nur am Basistrack). */}
+      {track && !compareTrack && (
+        <RangeSelector
+          totalPoints={track.meta.n_points}
+          activeIdx={safeIdx}
+          api={rangeApi}
+        />
+      )}
+
       {viewTrack && (displaySatellites || accelActive) && (
         <div style={sliderStyle}>
           <button
@@ -1065,6 +1066,31 @@ export default function App() {
             setCharts((cs) => cs.filter((c) => c.hash !== hash))
           }
         />
+      )}
+
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+
+      {toast && (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(20, 20, 28, 0.95)",
+            color: "#eee",
+            fontSize: 13,
+            padding: "10px 16px",
+            borderRadius: 6,
+            border: "1px solid rgba(255,255,255,0.15)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+            zIndex: 1000,
+            pointerEvents: "none",
+          }}
+        >
+          {toast}
+        </div>
       )}
     </div>
   );

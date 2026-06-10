@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { base64ToBytes } from "../pipeline/export/base64";
 import { decodePayload, type DecodedPayload } from "../pipeline/export/payload";
+import { ensureKinematics } from "../pipeline/processing/track-model";
 import { enrichTrackWithTerrain, suggestDemOffset } from "../pipeline/terrain";
 import type { ColorMode } from "../types";
 import { ColorLegend } from "../ui/ColorLegend";
@@ -102,10 +103,12 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
     }
   }, [track, dem, suggested]);
 
-  const displayTrack = useMemo(
-    () => (track && dem ? enrichTrackWithTerrain(track, dem, zOffset) : track),
-    [track, dem, zOffset],
-  );
+  const displayTrack = useMemo(() => {
+    if (!track) return track;
+    // Kinematik im Payload gestrippt → hier nachrechnen, bevor der Viewer liest.
+    const withKin = ensureKinematics(track);
+    return dem ? enrichTrackWithTerrain(withKin, dem, zOffset) : withKin;
+  }, [track, dem, zOffset]);
 
   // Chart-PNG-Bytes → ImageBitmap (mit 1px Rand).
   const [chartImages, setChartImages] = useState<ImageBitmap[]>([]);
@@ -164,16 +167,18 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
         ["altitude_gnd", "Höhe GND"],
         ["flight", "Flug"],
         ["drone", "Drohne"],
+        ["speed3d", "v₃D"],
         ["accel", "Beschl."],
-        ["energy", "Energie"],
-        ["energy_rate", "ΔEnergie"],
+        ["energy", "Spez. Energie"],
+        ["energy_rate", "Energierate"],
       ]
     : [
         ["speed", "Geschwindigkeit"],
         ["altitude", "Höhe MSL"],
+        ["speed3d", "v₃D"],
         ["accel", "Beschl."],
-        ["energy", "Energie"],
-        ["energy_rate", "ΔEnergie"],
+        ["energy", "Spez. Energie"],
+        ["energy_rate", "Energierate"],
       ];
 
   const m = displayTrack.meta;

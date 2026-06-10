@@ -35,11 +35,9 @@ import {
   type Rgba,
 } from "./colorMap";
 import {
-  computeAcceleration3D,
-  computeEnergyRate,
   robustSymmetricScale,
   type AccelDecomp,
-} from "./kinematics";
+} from "../pipeline/processing/kinematics";
 import { colorScaleFor, combinedBreaks } from "./colorScale";
 import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
@@ -83,6 +81,12 @@ interface Props {
   activeIdx?: number;
   /** Pfeile (laengs/quer/vertikal) am aktiven Punkt anzeigen. */
   showAccelArrows?: boolean;
+  /**
+   * Klick auf einen Track-Punkt (Pick-Layer). Liefert Track- und Punkt-Index,
+   * z.B. um den Slider/Aktivpunkt dorthin zu setzen. Ohne Handler ist der Klick
+   * wirkungslos.
+   */
+  onPointClick?: (trackIdx: number, pointIdx: number) => void;
 }
 
 interface DeckViewState {
@@ -159,6 +163,7 @@ export function TrackViewer({
   accelDecomp = null,
   activeIdx = 0,
   showAccelArrows = false,
+  onPointClick,
 }: Props) {
   // Anfangskamera nur einmal aus dem ERSTEN Track-Set ableiten. Ein spaeter
   // hinzukommender Vergleichstrack veraendert die Kamera nicht (der Nutzer
@@ -192,16 +197,18 @@ export function TrackViewer({
   const trackColorMode: ColorMode =
     colorMode === "flight" || colorMode === "drone" ? "speed" : colorMode;
 
-  // Pro Track: Farb-Positionen + (signierte) Rohwerte/Normwerte — aber aus
-  // EINER geteilten Skala (gemeinsame breaks bzw. gemeinsamer signed-Scale).
-  const signedUnit = colorMode === "accel" ? "m/s²" : colorMode === "energy_rate" ? "m/s" : "";
+  // Pro Track: Farb-Positionen + signierte Normwerte — aus EINER geteilten Skala
+  // (gemeinsame breaks bzw. gemeinsamer signed-Scale).
   const perTrack = useMemo(() => {
     const breaks = combinedBreaks(tracks, trackColorMode);
+    // Vorzeichenbehaftete Rohwerte fuer die signierten Modi: in der Pipeline
+    // vorberechnet (TrackPoints), hier nur noch gelesen — kein Rechnen beim
+    // Moduswechsel mehr.
     const rawPerTrack = tracks.map((t) =>
       colorMode === "accel"
-        ? computeAcceleration3D(t.points)
+        ? t.points.accel_tangential
         : colorMode === "energy_rate"
-          ? computeEnergyRate(t.points)
+          ? t.points.energy_rate
           : null,
     );
     const hasSigned = rawPerTrack.some((r) => r !== null);
@@ -217,7 +224,7 @@ export function TrackViewer({
       const signedNorm = raw
         ? raw.map((v) => (v === null ? null : Math.max(-1, Math.min(1, v / signedScale))))
         : null;
-      return { positions, signedRaw: raw, signedNorm };
+      return { positions, signedNorm };
     });
     // trackColorMode haengt deterministisch an colorMode → colorMode genuegt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -449,22 +456,47 @@ export function TrackViewer({
       const idx = info.object as number | undefined;
       if (idx === undefined || idx === null) return null;
 
-      const ts = track.points.timestamp_ms[idx];
-      const speed = track.points.speed_kmh[idx] ?? null;
-      const alt = track.points.alt[idx] ?? null;
-      const above = track.points.above_terrain[idx] ?? null;
-      const sr = perTrack[tIdx]?.signedRaw ? (perTrack[tIdx].signedRaw![idx] ?? null) : null;
+      const p = track.points;
+      const ts = p.timestamp_ms[idx];
+      const speed = p.speed_kmh[idx] ?? null;
+      const v3 = p.speed3d_ms[idx] ?? null;
+      const alt = p.alt[idx] ?? null;
+      const above = p.above_terrain[idx] ?? null;
+      const accel = p.accel_tangential[idx] ?? null;
 
+      // Vorzeichen-Formatierung fuer signierte Groessen (Beschl./Energierate).
+      const sgnVal = (v: number, digits = 1) =>
+        `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(digits)}`;
+
+      // FESTE Reihenfolge, unabhaengig vom Farbmodus (s. Backlog #5/#10): die
+      // immer verfuegbaren Felder werden stets gefuellt; modusspezifische Werte
+      // (Energie, G-Vektor) haengen nur dann an.
       const lines: string[] = [];
       // Bei mehreren Tracks: Trackname als erste Zeile zur Zuordnung.
       if (tracks.length > 1) lines.push(`<b>${track.meta.name}</b>`);
+      // Punkt-Index: wird fuer das Cut-Werkzeug gebraucht, daher immer zeigen.
+      lines.push(`Punkt ${idx}`);
       if (ts) lines.push(formatTimestamp(ts));
-      lines.push(formatSpeed(speed));
+      lines.push(`SOG ${formatSpeed(speed)}`);
+      lines.push(`v₃D ${formatSpeed(v3 === null ? null : v3 * 3.6)}`);
       lines.push(`MSL ${formatAltitude(alt)}`);
-      if (above !== null) lines.push(`üG ${Math.round(above)} m`);
-      if (sr !== null && Number.isFinite(sr)) {
-        const lbl = colorMode === "accel" ? "Beschl." : "ΔEnergie";
-        lines.push(`${lbl} ${sr >= 0 ? "+" : "−"}${Math.abs(sr).toFixed(1)} ${signedUnit}`);
+      if (above !== null) lines.push(`Höhe über Grund ${Math.round(above)} m`);
+      if (accel !== null && Number.isFinite(accel)) {
+        lines.push(`Beschl. ${sgnVal(accel)} m/s²`);
+      }
+
+      // Modusspezifisch: spezifische Energie bzw. Energierate nur im jeweiligen
+      // Modus (sonst wird der Tooltip zu lang).
+      if (colorMode === "energy") {
+        const h = p.energy_height_m[idx] ?? null;
+        if (h !== null && Number.isFinite(h)) {
+          lines.push(`Spez. Energie ${Math.round(h)} m`);
+        }
+      } else if (colorMode === "energy_rate") {
+        const er = p.energy_rate[idx] ?? null;
+        if (er !== null && Number.isFinite(er)) {
+          lines.push(`Energierate ${sgnVal(er)} m/s`);
+        }
       }
 
       // G-Vektor-Zerlegung (nur primaerer Track, nur wenn aktiv).
@@ -473,7 +505,7 @@ export function TrackViewer({
         if (d) {
           const sgn = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
           const mag = Math.hypot(d.long, d.lateral, d.vertical);
-          lines.push(`a ${mag.toFixed(1)} m/s²`);
+          lines.push(`|a| (3D) ${mag.toFixed(1)} m/s²`);
           lines.push(`längs ${sgn(d.long)} · quer ${sgn(d.lateral)} · vert ${sgn(d.vertical)}`);
         }
       }
@@ -491,7 +523,7 @@ export function TrackViewer({
         },
       };
     },
-    [tracks, perTrack, signedUnit, colorMode, accelDecomp],
+    [tracks, colorMode, accelDecomp],
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -556,6 +588,22 @@ export function TrackViewer({
     setHandleDragging(false);
   }, []);
 
+  // Klick auf einen Track-Punkt → Index nach aussen melden (Slider/Aktivpunkt).
+  // Spiegelt die Pick-Logik aus getTooltip: nur "track-pick-*"-Layer liefern
+  // den Punkt-Index in info.object.
+  const handleClick = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (info: any) => {
+      const id: string | undefined = info?.layer?.id;
+      if (!id || !id.startsWith("track-pick-")) return;
+      const tIdx = Number(id.slice("track-pick-".length));
+      const idx = info.object as number | undefined;
+      if (idx === undefined || idx === null) return;
+      onPointClick?.(tIdx, idx);
+    },
+    [onPointClick],
+  );
+
   const footer =
     tracks.length > 1
       ? tracks.map((t) => t.meta.name).join("  vs  ")
@@ -571,6 +619,7 @@ export function TrackViewer({
       onDragStart={onDragStart}
       onDrag={onDrag}
       onDragEnd={onDragEnd}
+      onClick={handleClick}
       getTooltip={getTooltip}
       style={{ position: "relative", width: "100%", height: "100%" }}
     >
