@@ -27,6 +27,8 @@ const t = {
   // Bewusst "Löschen" (nicht "Entfernen" oder ein blosses ✕) — die Aktion ist
   // unwiderruflich und darf nicht mit dem Schliessen-X verwechselt werden.
   remove: "Löschen",
+  confirmRemove: "Wirklich löschen?",
+  cancel: "Abbrechen",
   close: "Schließen",
   noTracks: "Noch keine Tracks gespeichert.",
   noCharts: "Noch keine Karten gespeichert.",
@@ -59,6 +61,10 @@ export function LibraryPanel({
 }) {
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
   const [charts, setCharts] = useState<ChartRecord[]>([]);
+  // Zwei-Stufen-Löschen als Sicherheitsnetz: der erste Klick merkt sich nur die
+  // Zeile (Schlüssel "track:<hash>" / "chart:<hash>"), erst der zweite Klick auf
+  // "Wirklich löschen?" führt aus. Schützt vor versehentlichem Datenverlust.
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const [trk, crt] = await Promise.all([getAllTrackRecords(), getAllCharts()]);
@@ -102,6 +108,37 @@ export function LibraryPanel({
     [reload, onChartDeleted],
   );
 
+  // Zweistufige Lösch-Steuerung pro Zeile. Erster Klick → Bestätigungszustand,
+  // zweiter Klick auf "Wirklich löschen?" → Ausführung. "Abbrechen" verwirft.
+  const renderDelete = (kind: "track" | "chart", hash: string, onConfirm: () => void) => {
+    const key = `${kind}:${hash}`;
+    const noun = kind === "track" ? "Track" : "Karte";
+    if (confirmKey === key) {
+      return (
+        <>
+          <button
+            style={btnDanger}
+            title={`${noun} unwiderruflich aus der Bibliothek löschen`}
+            onClick={() => {
+              setConfirmKey(null);
+              onConfirm();
+            }}
+          >
+            {t.confirmRemove}
+          </button>
+          <button style={btn} title="Löschen abbrechen" onClick={() => setConfirmKey(null)}>
+            {t.cancel}
+          </button>
+        </>
+      );
+    }
+    return (
+      <button style={btnDanger} title={`${noun} löschen`} onClick={() => setConfirmKey(key)}>
+        {t.remove}
+      </button>
+    );
+  };
+
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
@@ -143,13 +180,7 @@ export function LibraryPanel({
                   {t.compare}
                 </button>
               )}
-              <button
-                style={btnDanger}
-                title="Track unwiderruflich aus der Bibliothek löschen"
-                onClick={() => void handleDeleteTrack(trk.hash)}
-              >
-                {t.remove}
-              </button>
+              {renderDelete("track", trk.hash, () => void handleDeleteTrack(trk.hash))}
             </div>
           ))
         )}
@@ -170,13 +201,7 @@ export function LibraryPanel({
                   {crt.bbox.lon_max.toFixed(3)}
                 </div>
               </div>
-              <button
-                style={btnDanger}
-                title="Karte unwiderruflich aus der Bibliothek löschen"
-                onClick={() => void handleDeleteChart(crt.hash)}
-              >
-                {t.remove}
-              </button>
+              {renderDelete("chart", crt.hash, () => void handleDeleteChart(crt.hash))}
             </div>
           ))
         )}
