@@ -1,7 +1,8 @@
 /**
  * HelpModal — erklaert die berechneten physikalischen Groessen (v3D, Tangential-
- * Beschleunigung, G-Vektor-Zerlegung, spezifische Energie). Modal im WebView,
- * keine externen Abhaengigkeiten. Erreichbar ueber das „?" in der Toolbar.
+ * Beschleunigung, Beschleunigungsvektor-Zerlegung, spezifische Energie). Modal
+ * im WebView, keine externen Abhaengigkeiten. Erreichbar ueber das „?" in der
+ * Toolbar.
  *
  * Begriffe konsistent mit der UI: „Spezifische Energie" (nicht „Energiehoehe"),
  * „Energierate" fuer dH/dt.
@@ -52,17 +53,24 @@ export function HelpModal({ onClose }: Props) {
             </p>
           </Section>
 
-          <Section title="Tangential-Beschleunigung a = dv₃D/dt">
+          <Section title="Tangential-Beschleunigung aₜ = dv₃D/dt">
             <p style={pStyle}>
-              Skalare Änderungsrate der Gesamtgeschwindigkeit (Zentraldifferenz).
-              Positiv = Beschleunigung, negativ = Verzögerung. Physikalisch: die
-              Projektion der Gesamtbeschleunigung auf den Geschwindigkeitsvektor.
-              Sie leitet sich aus <b>v₃D</b> ab, nicht aus der GPS-Geschwindigkeit —
-              deshalb steht v₃D im Selektor direkt davor.
+              Skalare Änderungsrate der Gesamtgeschwindigkeit (Zentraldifferenz
+              über die ungerundeten Werte). Positiv = Beschleunigung, negativ =
+              Verzögerung. Physikalisch: die Projektion der Gesamtbeschleunigung
+              auf den Geschwindigkeitsvektor. Sie leitet sich aus <b>v₃D</b> ab,
+              nicht aus der GPS-Geschwindigkeit — deshalb steht v₃D im Selektor
+              direkt davor.
+            </p>
+            <p style={pStyle}>
+              Nicht zu verwechseln mit <b>|a|</b> (Betrag des vollen
+              Beschleunigungsvektors, siehe unten): aₜ ist nur der Anteil entlang
+              der Bahn und kann nahe 0 sein, während |a| durch Quer- oder
+              Vertikalanteile groß ist (z.B. in einer Kurve mit konstantem Tempo).
             </p>
           </Section>
 
-          <Section title="G-Vektor-Zerlegung (Längs / Quer / Vertikal)">
+          <Section title="Beschleunigungsvektor-Zerlegung (Längs / Quer / Vertikal)">
             <p style={pStyle}>
               Vollständige 3D-Beschleunigung im ENU-Frame, zerlegt in drei
               Körperachsen:
@@ -82,9 +90,13 @@ export function HelpModal({ onClose }: Props) {
               </li>
             </ul>
             <p style={pStyle}>
-              Alle drei in m/s² (1 g ≈ 9,81 m/s²). Berechnet mit zentralen
-              Zeitdifferenzen + 3-Punkt-Glättung. Bei aktiver G-Zerlegung werden die
-              Komponenten im Tooltip angezeigt.
+              Alle drei in m/s² (1 g ≈ 9,81 m/s²), rein kinematisch aus der
+              Position abgeleitet — ohne Schwerkraftanteil. Berechnet mit
+              zentralen Zeitdifferenzen; die Glättung folgt dem Regler in den
+              Overlay-Schaltflächen (Standard: 3-Punkt-Mittel). <b>|a|</b> ist
+              der Betrag √(aₗ² + a꜀² + a᷊²) — immer ≥ 0. Die Komponenten stehen
+              im Seitenpanel und im Tooltip; der Schalter „Beschleunigungsvektor"
+              blendet nur die Pfeile im 3D-Bild ein/aus.
             </p>
           </Section>
 

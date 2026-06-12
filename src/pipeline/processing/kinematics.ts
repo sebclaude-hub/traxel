@@ -239,7 +239,7 @@ function toLocalEnu(points: GeoKinematicPoints): {
  * Werte im Fenster gemittelt. Ein null-Mittelpunkt bleibt null (es werden keine
  * Werte erfunden). An den Raendern schrumpft das Fenster. Ein groesseres Fenster
  * glaettet staerker, verschmiert aber die kurzen Beschleunigungsereignisse
- * (Kurveneingang/Bremspunkt), die der G-Vektor gerade zeigen soll.
+ * (Kurveneingang/Bremspunkt), die der Beschleunigungsvektor gerade zeigen soll.
  */
 function movingAverage(
   values: (number | null)[],

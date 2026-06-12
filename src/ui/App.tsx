@@ -32,7 +32,7 @@ import type { ChartRecord } from "../library/db";
 import { LibraryPanel } from "./LibraryPanel";
 import { ColorLegend } from "./ColorLegend";
 import { SkyPlot } from "../viewer/SkyPlot";
-import { formatDistance, formatDuration, formatTimestamp } from "../viewer/formatters";
+import { formatDistance, formatDuration, formatSpeed, formatTimestamp } from "../viewer/formatters";
 import { usePipeline } from "./usePipeline";
 import { encodePayload } from "../pipeline/export/payload";
 import { bytesToBase64 } from "../pipeline/export/base64";
@@ -127,11 +127,16 @@ export default function App() {
 
   const [colorMode, setColorMode] = useState<ColorMode>("speed");
   const [showCurtain, setShowCurtain] = useState(true);
-  // G-Vektor: 3D-Beschleunigungspfeile (laengs/quer/vertikal) am aktiven Punkt.
+  // Beschleunigungsvektor: Pfeile (laengs/quer/vertikal) am aktiven Punkt im
+  // 3D-Bild. Steuert NUR die Pfeil-Darstellung — die Zahlenwerte stehen immer
+  // im Seitenpanel.
   const [showAccel, setShowAccel] = useState(false);
-  // Glaettungsfenster (Punkte) fuer die G-Vektor-Zerlegung. 1 = keine Glaettung,
-  // 3 = 3-Punkt usw. Daempft das Funkeln der doppelten Differentiation.
+  // Glaettungsfenster (Punkte) fuer die Beschleunigungsvektor-Zerlegung.
+  // 1 = keine Glaettung, 3 = 3-Punkt usw. Daempft das Funkeln der doppelten
+  // Differentiation. Wirkt live auf Pfeile, Tooltip und Seitenpanel.
   const [accelSmoothWindow, setAccelSmoothWindow] = useState(3);
+  // Seitenpanel (Satelliten + Messpunktdaten) ein-/ausgefahren.
+  const [sidePanelOpen, setSidePanelOpen] = useState(true);
   // Wiedergabe: zaehlt den aktiven Punkt automatisch hoch (Anzeigedauer pro
   // Punkt, NICHT die echte Track-Zeit).
   const [playing, setPlaying] = useState(false);
@@ -245,16 +250,19 @@ export default function App() {
 
   // Gemeinsamer Post-Load-Code: State setzen, Cuts/Charts zuruecksetzen. Wird
   // vom Datei-Import UND vom Wiederoeffnen aus der Bibliothek genutzt.
+  // rangeApi ist als Objekt pro Render neu — clearAll selbst ist stabil
+  // (useCallback), daher destrukturiert als Dependency.
+  const { clearAll: clearAllRanges } = rangeApi;
   const applyLoadedTrack = useCallback((td: TrackData, sat: SatelliteData | null) => {
     setTrack(td);
     setSatellites(sat);
     setCompareTrack(null); // neuer Haupttrack → bestehenden Vergleich verwerfen
-    rangeApi.clearAll();
+    clearAllRanges();
     setCharts([]);
     setEditChartId(null);
     setSatelliteImage(null);
     setSatelliteState("idle");
-  }, []);
+  }, [clearAllRanges]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -340,7 +348,7 @@ export default function App() {
           return;
         }
         setCompareTrack(td);
-        setPlaying(false); // G-Vektor/Slider entfaellt im Vergleich → Wiedergabe stoppen
+        setPlaying(false); // Beschleunigungsvektor/Slider entfaellt im Vergleich → Wiedergabe stoppen
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -623,20 +631,22 @@ export default function App() {
     [viewTrack, viewCompareTrack],
   );
 
-  // G-Vektor ist im Vergleichsmodus deaktiviert: die Pfeile + der Punkt-Slider
-  // beziehen sich nur auf den primaeren Track, und die Kombination aus zwei
-  // ueberlagerten Tracks + abgefahrenem Aktivpunkt fuehrte zu einem Absturz
-  // (Testbefund A10). Bis zur sauberen Ursachenklaerung: beim Vergleich aus.
+  // Der Beschleunigungsvektor ist im Vergleichsmodus deaktiviert: die Pfeile +
+  // der Punkt-Slider beziehen sich nur auf den primaeren Track, und die
+  // Kombination aus zwei ueberlagerten Tracks + abgefahrenem Aktivpunkt fuehrte
+  // zu einem Absturz (Testbefund A10). Bis zur Ursachenklaerung: beim Vergleich aus.
   const accelActive = showAccel && !compareTrack;
 
-  // Beschleunigungs-Zerlegung des primaeren Tracks (nur im G-Vektor-Modus —
-  // ist die 2. Ableitung, also nicht umsonst rechnen). Speist Pfeile + Readout.
+  // Beschleunigungs-Zerlegung des primaeren Tracks — immer berechnet (speist
+  // Seitenpanel, Tooltip und Pfeile; der Pfeil-Schalter steuert nur die
+  // Darstellung im 3D-Bild). Folgt live dem Glaettungsregler. Im Vergleichs-
+  // modus aus (gilt nur fuer den primaeren Track, s.o.).
   const accelDecomp = useMemo(
     () =>
-      accelActive && viewTrack
+      viewTrack && !compareTrack
         ? decomposeAcceleration(viewTrack.points, { smoothWindow: accelSmoothWindow })
         : null,
-    [accelActive, viewTrack, accelSmoothWindow],
+    [viewTrack, compareTrack, accelSmoothWindow],
   );
 
   // Wiedergabe: aktiven Punkt im gewaehlten Takt hochzaehlen (mit Schleife).
@@ -677,6 +687,12 @@ export default function App() {
   const safeIdx = viewTrack
     ? Math.min(activeIdx, Math.max(0, viewTrack.meta.n_points - 1))
     : 0;
+
+  // Seitenpanel: Satelliten (NMEA) + Messpunktdaten. Immer verfuegbar, sobald
+  // ein Track geladen ist; im Vergleichsmodus nur mit Satellitendaten (die
+  // Messpunktdaten gelten nur fuer den primaeren Track). Gleiche Bedingung
+  // steuert den Punkt-Slider unten.
+  const sidePanelVisible = Boolean(viewTrack && (displaySatellites || !compareTrack));
 
   // Flug-/Drohnen-Farbmodi UND "Höhe GND" brauchen Terrain. Ist Terrain aus,
   // faellt flight/drone auf Speed und altitude_gnd auf Höhe (MSL) zurueck.
@@ -832,13 +848,21 @@ export default function App() {
               editChart={editChart}
               accelDecomp={accelDecomp}
               activeIdx={safeIdx}
+              showActivePoint={!compareTrack}
               showAccelArrows={accelActive}
               onPointClick={(_, idx) => {
                 setPlaying(false); // Wiedergabe stoppen, sonst laeuft der Punkt sofort weiter
                 setActiveIdx(idx);
               }}
             />
-            <div style={togglesStyle}>
+            {/* Overlay-Schaltflaechen weichen dem ausgefahrenen Seitenpanel
+                animiert aus (gleiche Dauer wie die Panel-Transition). */}
+            <div
+              style={{
+                ...togglesStyle,
+                right: sidePanelVisible && sidePanelOpen ? SIDE_PANEL_W + 24 : 24,
+              }}
+            >
               <Segmented<ColorMode>
                 value={effColorMode}
                 options={colorOptions}
@@ -857,21 +881,21 @@ export default function App() {
                 <button
                   style={{ ...btnStyle, opacity: 0.5, cursor: "not-allowed" }}
                   disabled
-                  title="G-Vektor ist im Vergleichsmodus deaktiviert (Pfeile gelten nur fuer den primaeren Track)."
+                  title="Beschleunigungsvektor ist im Vergleichsmodus deaktiviert (Pfeile gelten nur fuer den primaeren Track)."
                 >
-                  G-Vektor (im Vergleich aus)
+                  Beschl.-Vektor (im Vergleich aus)
                 </button>
               ) : (
                 <Segmented<boolean>
                   value={showAccel}
                   options={[
-                    [true, "G-Vektor"],
+                    [true, "Beschleunigungsvektor", "Pfeile (längs/quer/vertikal) am aktiven Punkt im 3D-Bild. Die Zahlenwerte stehen unabhängig davon im Seitenpanel."],
                     [false, "aus"],
                   ]}
                   onChange={setShowAccel}
                 />
               )}
-              {showAccel && !compareTrack && (
+              {!compareTrack && (
                 <Segmented<string>
                   value={String(accelSmoothWindow)}
                   options={[
@@ -984,6 +1008,48 @@ export default function App() {
                 ))}
               </div>
             </div>
+
+            {/* Seitenpanel: faehrt ueber dem Canvas von rechts ein/aus
+                (translateX), bleibt gemountet, damit die Transition laeuft.
+                Griff-Knopf sitzt an der Panelkante und faehrt mit. */}
+            {sidePanelVisible && (
+              <>
+                <button
+                  style={{
+                    ...panelHandleStyle,
+                    right: sidePanelOpen ? SIDE_PANEL_W : 0,
+                  }}
+                  onClick={() => setSidePanelOpen((o) => !o)}
+                  title={sidePanelOpen ? "Datenpanel ausblenden" : "Datenpanel einblenden"}
+                >
+                  {sidePanelOpen ? "▸" : "◂"}
+                </button>
+                <div
+                  style={{
+                    ...sidePanelStyle,
+                    transform: sidePanelOpen ? "translateX(0)" : "translateX(100%)",
+                  }}
+                >
+                  {displaySatellites && (
+                    <>
+                      <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
+                        Satellitenkonstellation
+                      </div>
+                      <SkyPlot satData={displaySatellites} trackIdx={safeIdx} />
+                      <div style={{ color: "#556", fontSize: 10, marginTop: 6 }}>
+                        {displaySatellites.talkers.join(" / ")}
+                      </div>
+                    </>
+                  )}
+                  {!compareTrack && (
+                    <>
+                      <PointReadout track={viewTrack} idx={safeIdx} />
+                      <AccelReadout decomp={accelDecomp?.[safeIdx] ?? null} />
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </>
         ) : (
           <DropPrompt
@@ -995,25 +1061,6 @@ export default function App() {
           />
         )}
         </div>
-
-        {viewTrack && (displaySatellites || (accelActive && accelDecomp)) && (
-          <div style={sidePanelStyle}>
-            {displaySatellites && (
-              <>
-                <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
-                  Satellitenkonstellation
-                </div>
-                <SkyPlot satData={displaySatellites} trackIdx={safeIdx} />
-                <div style={{ color: "#556", fontSize: 10, marginTop: 6 }}>
-                  {displaySatellites.talkers.join(" / ")}
-                </div>
-              </>
-            )}
-            {accelActive && accelDecomp && (
-              <AccelReadout decomp={accelDecomp[safeIdx] ?? null} />
-            )}
-          </div>
-        )}
       </div>
 
       {/* Cut-Leiste: Index-Raum des ORIGINAL-Tracks (Cuts laufen gegen
@@ -1026,7 +1073,7 @@ export default function App() {
         />
       )}
 
-      {viewTrack && (displaySatellites || accelActive) && (
+      {sidePanelVisible && viewTrack && (
         <div style={sliderStyle}>
           <button
             style={btnStyle}
@@ -1152,10 +1199,71 @@ function DropPrompt({
   );
 }
 
-// Zahlen-Readout der Beschleunigungs-Zerlegung am aktiven Punkt. Farben passend
-// zu den Pfeilen (laengs=gruen, quer=orange, vertikal=blau).
+// Vertikalgeschwindigkeit (m/s) am Punkt i — zentrale Differenz wie in
+// kinematics.verticalSpeed, aber O(1) nur fuer den einen angezeigten Punkt.
+function verticalSpeedAt(points: TrackData["points"], i: number): number | null {
+  const n = points.alt.length;
+  if (n < 2) return null;
+  const lo = i === 0 ? 0 : i - 1;
+  const hi = i === n - 1 ? n - 1 : i + 1;
+  const a = points.alt[lo];
+  const b = points.alt[hi];
+  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b)) {
+    return null;
+  }
+  const dt = (points.timestamp_ms[hi] - points.timestamp_ms[lo]) / 1000;
+  return dt > 0 ? (b - a) / dt : null;
+}
+
+// Alle verfuegbaren Daten zum aktiven Messpunkt — unabhaengig von Farbmodus und
+// Pfeil-Schalter (der steuert nur die Darstellung im 3D-Bild). Hoehe mit einer
+// Nachkommastelle: die gerundete Anzeige hat schon zu Verwirrung bei v3D/vz
+// gefuehrt (Nachbarpunkte mit "1 m Differenz", die real 0,2 m war).
+function PointReadout({ track, idx }: { track: TrackData; idx: number }) {
+  const p = track.points;
+  const sgn = (v: number, digits: number) =>
+    `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(digits)}`;
+  const row = (label: string, value: string) => (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, gap: 8 }}>
+      <span style={{ color: "#999" }}>{label}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{value}</span>
+    </div>
+  );
+
+  const ts = p.timestamp_ms[idx];
+  const speed = p.speed_kmh[idx] ?? null;
+  const v3 = p.speed3d_ms[idx] ?? null;
+  const vz = verticalSpeedAt(p, idx);
+  const alt = p.alt[idx] ?? null;
+  const above = p.above_terrain[idx] ?? null;
+  const accel = p.accel_tangential[idx] ?? null;
+  const eh = p.energy_height_m[idx] ?? null;
+  const er = p.energy_rate[idx] ?? null;
+  const num = (v: number | null, fmt: (x: number) => string) =>
+    v !== null && Number.isFinite(v) ? fmt(v) : "–";
+
+  return (
+    <div style={{ width: "100%", marginTop: 12 }}>
+      <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
+        Messpunkt {idx}
+      </div>
+      {row("Zeit", ts ? formatTimestamp(ts).replace(" UTC", "") : "–")}
+      {row("SOG", formatSpeed(speed))}
+      {row("v₃D", formatSpeed(v3 === null ? null : v3 * 3.6))}
+      {row("v_z", num(vz, (v) => `${sgn(v, 2)} m/s`))}
+      {row("Höhe MSL", num(alt, (v) => `${v.toFixed(1)} m`))}
+      {row("Höhe GND", num(above, (v) => `${Math.round(v)} m`))}
+      {row("Beschl. a_t", num(accel, (v) => `${sgn(v, 2)} m/s²`))}
+      {row("Spez. Energie", num(eh, (v) => `${Math.round(v)} m`))}
+      {row("Energierate", num(er, (v) => `${sgn(v, 2)} m/s`))}
+    </div>
+  );
+}
+
+// Zahlen-Readout der Beschleunigungsvektor-Zerlegung am aktiven Punkt. Farben
+// passend zu den Pfeilen (laengs=gruen, quer=orange, vertikal=blau).
 function AccelReadout({ decomp }: { decomp: AccelDecomp | null }) {
-  const sgn = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+  const sgn = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
   const row = (label: string, value: number, color: string) => (
     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
       <span style={{ color }}>{label}</span>
@@ -1163,9 +1271,9 @@ function AccelReadout({ decomp }: { decomp: AccelDecomp | null }) {
     </div>
   );
   return (
-    <div style={{ width: "100%", marginTop: 8 }}>
+    <div style={{ width: "100%", marginTop: 12 }}>
       <div style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
-        Beschleunigung · m/s²
+        Beschleunigungsvektor · m/s²
       </div>
       {decomp ? (
         <>
@@ -1184,7 +1292,7 @@ function AccelReadout({ decomp }: { decomp: AccelDecomp | null }) {
           >
             <span>Betrag</span>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>
-              {Math.hypot(decomp.long, decomp.lateral, decomp.vertical).toFixed(1)}
+              {Math.hypot(decomp.long, decomp.lateral, decomp.vertical).toFixed(2)}
             </span>
           </div>
         </>
@@ -1341,9 +1449,16 @@ const headerStyle: React.CSSProperties = {
   borderBottom: "1px solid #2a2a2a",
   flexShrink: 0,
 };
+// Breite des Seitenpanels (inkl. Padding, boxSizing border-box) — auch der
+// Versatz von Griff und Overlay-Schaltflaechen rechnet damit.
+const SIDE_PANEL_W = 300;
 const sidePanelStyle: React.CSSProperties = {
-  width: 300,
-  flexShrink: 0,
+  position: "absolute",
+  top: 0,
+  right: 0,
+  bottom: 0,
+  width: SIDE_PANEL_W,
+  boxSizing: "border-box",
   background: "#111",
   borderLeft: "1px solid #2a2a2a",
   padding: 16,
@@ -1351,6 +1466,27 @@ const sidePanelStyle: React.CSSProperties = {
   flexDirection: "column",
   alignItems: "center",
   overflowY: "auto",
+  transition: "transform 0.25s ease",
+  zIndex: 11,
+};
+// Griff zum Ein-/Ausfahren des Seitenpanels: klebt an der Panelkante
+// (right wird inline gesetzt) und faehrt synchron mit.
+const panelHandleStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 16,
+  height: 56,
+  padding: 0,
+  background: "#1c1c1c",
+  color: "#aaa",
+  border: "1px solid #333",
+  borderRight: "none",
+  borderRadius: "6px 0 0 6px",
+  cursor: "pointer",
+  fontSize: 10,
+  zIndex: 12,
+  transition: "right 0.25s ease",
 };
 const sliderStyle: React.CSSProperties = {
   display: "flex",
@@ -1382,11 +1518,12 @@ const numStyle: React.CSSProperties = {
 const togglesStyle: React.CSSProperties = {
   position: "absolute",
   top: 12,
-  right: 12,
+  right: 24, // wird inline ueberschrieben (weicht dem Seitenpanel aus)
   display: "flex",
   flexDirection: "column",
   gap: 8,
   zIndex: 10,
+  transition: "right 0.25s ease",
 };
 const centerStyle: React.CSSProperties = {
   display: "flex",
