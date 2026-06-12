@@ -24,7 +24,9 @@ const t = {
   charts: "Karten",
   open: "Öffnen",
   compare: "Vergleichen",
-  remove: "Entfernen",
+  // Bewusst "Löschen" (nicht "Entfernen" oder ein blosses ✕) — die Aktion ist
+  // unwiderruflich und darf nicht mit dem Schliessen-X verwechselt werden.
+  remove: "Löschen",
   close: "Schließen",
   noTracks: "Noch keine Tracks gespeichert.",
   noCharts: "Noch keine Karten gespeichert.",
@@ -141,8 +143,12 @@ export function LibraryPanel({
                   {t.compare}
                 </button>
               )}
-              <button style={btn} title={t.remove} onClick={() => void handleDeleteTrack(trk.hash)}>
-                ✕
+              <button
+                style={btnDanger}
+                title="Track unwiderruflich aus der Bibliothek löschen"
+                onClick={() => void handleDeleteTrack(trk.hash)}
+              >
+                {t.remove}
               </button>
             </div>
           ))
@@ -164,8 +170,12 @@ export function LibraryPanel({
                   {crt.bbox.lon_max.toFixed(3)}
                 </div>
               </div>
-              <button style={btn} title={t.remove} onClick={() => void handleDeleteChart(crt.hash)}>
-                ✕
+              <button
+                style={btnDanger}
+                title="Karte unwiderruflich aus der Bibliothek löschen"
+                onClick={() => void handleDeleteChart(crt.hash)}
+              >
+                {t.remove}
               </button>
             </div>
           ))
@@ -251,4 +261,12 @@ const btnPrimary: React.CSSProperties = {
   background: "#2a6",
   color: "#021",
   fontWeight: 600,
+};
+// Destruktive Aktion (Löschen): rot abgesetzt, damit sie sich klar vom neutralen
+// "Schließen" und den übrigen Aktionen abhebt — beugt versehentlichem Löschen vor.
+const btnDanger: React.CSSProperties = {
+  ...btn,
+  background: "#3a1414",
+  color: "#f0a0a0",
+  border: "1px solid #6a2020",
 };
