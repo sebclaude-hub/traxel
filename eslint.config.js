@@ -26,14 +26,5 @@ export default tseslint.config([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
-    rules: {
-      // Neue React-Compiler-Regeln (react-hooks v7): melden etablierte
-      // Pre-Compiler-Muster im Bestand (State-Reset in Effekten, "latest ref"
-      // waehrend des Renders). Echte Befunde, aber Umbauten mit Regressions-
-      // risiko — als Warnung sichtbar halten und gezielt abarbeiten, statt
-      // jeden Lint-Lauf rot zu machen.
-      "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/refs": "warn",
-    },
   },
 ]);

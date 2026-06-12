@@ -273,13 +273,16 @@ function RangeBar({
 
   // Aktuelle Werte in Refs spiegeln, damit der Window-PointerMove-Handler immer
   // die neuesten Grenzen sieht, ohne die Listener bei jedem State-Update neu
-  // zu binden.
+  // zu binden. Zuweisung im Effekt (nach dem Commit), nicht waehrend des
+  // Renders — der Drag-Handler liest die Refs ohnehin erst beim Pointer-Event.
   const rangeRef = useRef(range);
-  rangeRef.current = range;
   const onMoveRef = useRef(onMove);
-  onMoveRef.current = onMove;
   const xToIdxRef = useRef(xToIdx);
-  xToIdxRef.current = xToIdx;
+  useEffect(() => {
+    rangeRef.current = range;
+    onMoveRef.current = onMove;
+    xToIdxRef.current = xToIdx;
+  });
 
   const startDrag = useCallback(
     (side: "start" | "end") => (e: React.PointerEvent) => {

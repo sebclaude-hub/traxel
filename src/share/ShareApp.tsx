@@ -112,10 +112,17 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
 
   // Chart-PNG-Bytes → ImageBitmap (mit 1px Rand).
   const [chartImages, setChartImages] = useState<ImageBitmap[]>([]);
+  // Beim Payload-Wechsel die alten Bitmaps waehrend des Renders verwerfen (statt
+  // synchron im Effekt) — deckt auch den "keine Karten"-Fall ab. Der Effekt
+  // dekodiert dann nur noch asynchron.
+  const [prevDecoded, setPrevDecoded] = useState(decoded);
+  if (prevDecoded !== decoded) {
+    setPrevDecoded(decoded);
+    setChartImages([]);
+  }
   useEffect(() => {
     const charts = decoded?.charts;
     if (!charts || charts.length === 0) {
-      setChartImages([]);
       return;
     }
     let cancelled = false;

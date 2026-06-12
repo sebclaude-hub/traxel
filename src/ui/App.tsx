@@ -156,10 +156,14 @@ export default function App() {
 
   // Aktiver Trackpunkt (steuert den SkyPlot). Bei Trackwechsel zurueck auf 0.
   const [activeIdx, setActiveIdx] = useState(0);
-  useEffect(() => {
+  // Reset beim Trackwechsel waehrend des Renders ableiten (statt nachgelagert im
+  // Effekt) — React verwirft den Zwischenrender, bevor er sichtbar wird.
+  const [prevTrack, setPrevTrack] = useState(track);
+  if (prevTrack !== track) {
+    setPrevTrack(track);
     setActiveIdx(0);
     setPlaying(false); // Wiedergabe bei Trackwechsel stoppen
-  }, [track]);
+  }
 
   // Cuts (gegen die Original-Track-Indizes) via visuelle Cut-Leiste
   // (RangeSelector). Die Ranges werden als CutSpec[] an applyCuts gereicht.
@@ -200,15 +204,22 @@ export default function App() {
   // Terrain laden, sobald ein Track vorliegt (im Worker). Bei Trackwechsel ODER
   // hinzukommendem Vergleichstrack (groessere Bounds) neu laden; der vorherige
   // Lauf wird per cancelled-Flag verworfen.
-  useEffect(() => {
-    if (!demBounds) {
-      setDem(null);
-      setTerrainState("idle");
-      return;
-    }
-    let cancelled = false;
+  //
+  // Der synchrone Reset (altes DEM verwerfen, "loading" zeigen) wird waehrend des
+  // Renders abgeleitet — sobald sich Bounds oder Detailstufe aendern. Der Effekt
+  // kuemmert sich nur noch um die asynchrone Abfrage.
+  const [terrainTrigger, setTerrainTrigger] = useState<{
+    bounds: typeof demBounds;
+    detail: TerrainDetail;
+  }>({ bounds: demBounds, detail: terrainDetail });
+  if (terrainTrigger.bounds !== demBounds || terrainTrigger.detail !== terrainDetail) {
+    setTerrainTrigger({ bounds: demBounds, detail: terrainDetail });
     setDem(null);
-    setTerrainState("loading");
+    setTerrainState(demBounds ? "loading" : "idle");
+  }
+  useEffect(() => {
+    if (!demBounds) return;
+    let cancelled = false;
     loadTerrain(demBounds, TERRAIN_DETAIL[terrainDetail])
       .then((grid) => {
         if (!cancelled) {
@@ -225,14 +236,25 @@ export default function App() {
   }, [demBounds, loadTerrain, terrainDetail]);
 
   // Satellitenbilder laden, sobald der Nutzer "Satellit"-Ansicht waehlt.
-  // Neu laden wenn Bounds (Track/Vergleich) oder Detailstufe wechseln.
+  // Neu laden wenn Bounds (Track/Vergleich) wechseln. Synchroner Reset wieder
+  // waehrend des Renders abgeleitet — nur beim Eintritt in die "sat"-Ansicht
+  // bzw. Bounds-Wechsel innerhalb dieser Ansicht.
+  const [satTrigger, setSatTrigger] = useState<{
+    view: TerrainView;
+    bounds: typeof demBounds;
+  }>({ view: terrainView, bounds: demBounds });
+  if (satTrigger.view !== terrainView || satTrigger.bounds !== demBounds) {
+    setSatTrigger({ view: terrainView, bounds: demBounds });
+    if (terrainView === "sat" && demBounds) {
+      setSatelliteImage(null);
+      setSatelliteState("loading");
+    }
+  }
   useEffect(() => {
     if (terrainView !== "sat" || !demBounds) {
       return;
     }
     let cancelled = false;
-    setSatelliteImage(null);
-    setSatelliteState("loading");
     loadSatellite(demBounds)
       .then((sat) => {
         if (!cancelled) {

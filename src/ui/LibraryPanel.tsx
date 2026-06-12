@@ -66,9 +66,22 @@ export function LibraryPanel({
     setCharts(crt);
   }, []);
 
+  // Erstbefuellung beim Mount. setState liegt hinter dem await (asynchron) —
+  // inline als IIFE, damit das kein synchroner Effekt-State-Set ist.
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    let cancelled = false;
+    void (async () => {
+      const [trk, crt] = await Promise.all([getAllTrackRecords(), getAllCharts()]);
+      if (cancelled) return;
+      trk.sort((a, b) => b.savedAt - a.savedAt);
+      crt.sort((a, b) => b.savedAt - a.savedAt);
+      setTracks(trk);
+      setCharts(crt);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleDeleteTrack = useCallback(
     async (hash: string) => {
