@@ -53,14 +53,16 @@ export function geodesicDistanceMeters(
   const sinU2 = Math.sin(U2);
   const cosU2 = Math.cos(U2);
 
+  // Ohne Initialwert: der do-Block weist alle vor der ersten Lesung zu
+  // (do laeuft mindestens einmal); tsc prueft das (definite assignment).
   let lambda = L;
-  let lambdaPrev = 0;
+  let lambdaPrev: number;
   let iter = 0;
-  let cosSqAlpha = 0;
-  let sinSigma = 0;
-  let cos2SigmaM = 0;
-  let cosSigma = 0;
-  let sigma = 0;
+  let cosSqAlpha: number;
+  let sinSigma: number;
+  let cos2SigmaM: number;
+  let cosSigma: number;
+  let sigma: number;
 
   do {
     const sinLambda = Math.sin(lambda);

@@ -236,7 +236,6 @@ describe("encodePayload / decodePayload", () => {
     const packed = await encodePayload({ track: makeTrack(2000), dem });
     const b64Len = bytesToBase64(packed).length;
     const kib = (n: number) => (n / 1024).toFixed(0);
-    // eslint-disable-next-line no-console
     console.log(
       `[Export-Größe] ${_label}: roh(float64) ${kib(rawFloatBytes)} KiB → ` +
         `delta+gzip ${kib(packed.length)} KiB → base64(HTML) ${kib(b64Len)} KiB`,
