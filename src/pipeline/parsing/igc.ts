@@ -106,7 +106,7 @@ export function parseIgc(text: string): RawTrackPoint[] {
 
     const timestampMs = Date.UTC(date.y, date.mo - 1, date.d + dayOffset, hh, mi, ss);
 
-    points.push({ timestampMs, lat, lon, altM, speedKmh: null, speedKnots: null });
+    points.push({ timestampMs, lat, lon, altM, speedKmh: null, speedKnots: null, hdop: null });
   }
 
   // Stabil nach Zeit sortieren (Reihenfolge bei gleichem Zeitstempel bleibt).

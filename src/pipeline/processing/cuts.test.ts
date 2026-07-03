@@ -4,9 +4,9 @@ import type { SatelliteData, TrackData } from "../../types";
 import { applyCuts } from "./cuts";
 import { enrichKinematics } from "./kinematics";
 
-/** Baut einen Track aus Punkt-Tupeln (ts in s, lon in Grad, speed km/h). */
+/** Baut einen Track aus Punkt-Tupeln (ts in s, lon in Grad, speed km/h, optional hdop). */
 function makeTrack(
-  pts: { tsS: number; lon: number; speedKmh: number }[],
+  pts: { tsS: number; lon: number; speedKmh: number; hdop?: number | null }[],
 ): TrackData {
   const n = pts.length;
   return {
@@ -35,6 +35,7 @@ function makeTrack(
       timestamp_ms: pts.map((p) => p.tsS * 1000),
       speed_q_idx: pts.map(() => -1),
       alt_q_idx: pts.map(() => -1),
+      hdop: pts.map((p) => p.hdop ?? null),
       ...enrichKinematics({
         alt: pts.map(() => 100),
         speed_kmh: pts.map((p) => p.speedKmh),
@@ -114,5 +115,41 @@ describe("applyCuts", () => {
     const res = applyCuts(t, null, []);
     expect(res.track).toBe(t);
     expect(res.derivation).toBeNull();
+  });
+
+  it("bewahrt HDOP-Werte bei trim", () => {
+    const track = makeTrack([
+      { tsS: 0, lon: 0.0, speedKmh: 40, hdop: 1.5 },
+      { tsS: 10, lon: 0.001, speedKmh: 40, hdop: 1.2 },
+      { tsS: 20, lon: 0.0015, speedKmh: 40, hdop: 2.0 },
+      { tsS: 30, lon: 0.0018, speedKmh: 40, hdop: 1.8 },
+    ]);
+    const res = applyCuts(track, null, [{ start: 0, end: 1, mode: "trim" }]);
+    expect(res.track.points.hdop).toEqual([2.0, 1.8]);
+  });
+
+  it("bewahrt HDOP-Werte bei gap", () => {
+    const track = makeTrack([
+      { tsS: 0, lon: 0.0, speedKmh: 40, hdop: 1.5 },
+      { tsS: 10, lon: 0.001, speedKmh: 40, hdop: 1.2 },
+      { tsS: 20, lon: 0.0015, speedKmh: 40, hdop: null },
+      { tsS: 30, lon: 0.0018, speedKmh: 40, hdop: 1.8 },
+    ]);
+    const res = applyCuts(track, null, [{ start: 1, end: 2, mode: "gap" }]);
+    // Punkte 0 und 3 bleiben mit ihren HDOP-Werten
+    expect(res.track.points.hdop).toEqual([1.5, 1.8]);
+  });
+
+  it("bewahrt HDOP-Werte bei bridge", () => {
+    const track = makeTrack([
+      { tsS: 0, lon: 0.0, speedKmh: 40, hdop: 1.5 },
+      { tsS: 10, lon: 0.001, speedKmh: 40, hdop: 1.2 },
+      { tsS: 20, lon: 0.0015, speedKmh: 40, hdop: 2.0 },
+      { tsS: 30, lon: 0.0018, speedKmh: 40, hdop: 1.8 },
+      { tsS: 40, lon: 0.002, speedKmh: 40, hdop: 1.6 },
+    ]);
+    const res = applyCuts(track, null, [{ start: 1, end: 2, mode: "bridge" }]);
+    // Punkte 0,3,4 bleiben mit HDOP erhalten
+    expect(res.track.points.hdop).toEqual([1.5, 1.8, 1.6]);
   });
 });

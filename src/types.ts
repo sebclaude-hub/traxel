@@ -49,6 +49,8 @@ export interface QuantileBreaks {
 //   vor "accel" platziert.
 // "energy" = spezifische Energie als Hoehenaequivalent H = h + v²/(2g)
 // (vorzeichenlos); "energy_rate" = dH/dt (vorzeichenbehaftet, wie accel gefaerbt).
+// "accuracy" = GPS-Genauigkeit (HDOP, Horizontal Dilution of Precision) — nur
+// bei NMEA-Quellen mit Satellitendata verfuegbar.
 export type ColorMode =
   | "speed"
   | "speed3d"
@@ -58,7 +60,8 @@ export type ColorMode =
   | "drone"
   | "accel"
   | "energy"
-  | "energy_rate";
+  | "energy_rate"
+  | "accuracy";
 
 export interface TrackPoints {
   lat: number[];
@@ -91,6 +94,10 @@ export interface TrackPoints {
    *  (Ueberbruecken) nach vorne verschoben wurde (Pro-Punkt-Hinweis).
    *  Fehlt = ueberall false. */
   is_bridged?: boolean[];
+  /** Horizontale Dilution of Precision (HDOP) aus GGA-Sätzen, einheitenlos.
+   *  Nur in NMEA-Logs verfügbar; bei anderen Formaten null.
+   *  Typische Werte: 0.8-2.0 = gut, 2.0-5.0 = moderat, >5.0 = schlecht. */
+  hdop: (number | null)[];
 }
 
 export interface TrackData {

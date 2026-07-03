@@ -98,6 +98,7 @@ export function parseKml(xml: string): RawTrackPoint[] {
         altM: c.alt,
         speedKmh: null,
         speedKnots: null,
+        hdop: null,
       });
     }
   }

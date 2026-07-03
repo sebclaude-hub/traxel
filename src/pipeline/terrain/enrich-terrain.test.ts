@@ -43,6 +43,7 @@ function makeTrack(pts: { lon: number; lat: number; alt: number | null }[]): Tra
       timestamp_ms: pts.map((_p, i) => i * 1000),
       speed_q_idx: pts.map(() => -1),
       alt_q_idx: pts.map(() => -1),
+      hdop: pts.map(() => null),
       ...enrichKinematics({
         alt: pts.map((p) => p.alt),
         speed_kmh: pts.map(() => null),

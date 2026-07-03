@@ -54,6 +54,7 @@ interface Rec {
   alt: number | null;
   speedKnots: number | null;
   speedKmph: number | null;
+  hdop: number | null;
 }
 
 /** Konsolidiert Nachrichten zu einem nach Zeit sortierten Schema-B-Track. */
@@ -66,7 +67,7 @@ export function messagesToTrack(messages: NmeaMessage[]): RawTrackPoint[] {
   const getRec = (ms: number): Rec => {
     let r = byTs.get(ms);
     if (!r) {
-      r = { lat: null, lon: null, alt: null, speedKnots: null, speedKmph: null };
+      r = { lat: null, lon: null, alt: null, speedKnots: null, speedKmph: null, hdop: null };
       byTs.set(ms, r);
     }
     return r;
@@ -92,6 +93,10 @@ export function messagesToTrack(messages: NmeaMessage[]): RawTrackPoint[] {
       if (m.lat !== null) r.lat = m.lat;
       if (m.lon !== null) r.lon = m.lon;
       if (m.altitude !== null) r.alt = m.altitude;
+      // HDOP: Minimum aller GGA-Werte pro Timestamp (beste Genauigkeit).
+      if (m.hdop !== null) {
+        r.hdop = r.hdop === null ? m.hdop : Math.min(r.hdop, m.hdop);
+      }
     } else if (m.type === "VTG") {
       const ms = combineDateTimeMs(lastDate, lastTime);
       if (ms === null) continue;
@@ -121,6 +126,7 @@ export function messagesToTrack(messages: NmeaMessage[]): RawTrackPoint[] {
       altM: r.alt,
       speedKmh,
       speedKnots,
+      hdop: r.hdop,
     });
   }
   return points;

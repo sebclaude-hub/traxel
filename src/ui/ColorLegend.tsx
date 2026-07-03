@@ -36,6 +36,7 @@ const t = {
   accelRight: "Beschl. +",
   energyLoss: "− verliert",
   energyGain: "gewinnt +",
+  accuracy: "GPS-Genauigkeit (HDOP)",
 };
 
 const BAR_H = 140; // Pixelhöhe des vertikalen Verlaufbalkens
@@ -140,7 +141,8 @@ export function ColorLegend({
       mode !== "speed3d" &&
       mode !== "altitude" &&
       mode !== "altitude_gnd" &&
-      mode !== "energy"
+      mode !== "energy" &&
+      mode !== "accuracy"
     ) {
       return null;
     }
@@ -154,7 +156,9 @@ export function ColorLegend({
             ? { title: t.altitude, unit: "m" }
             : mode === "altitude_gnd"
               ? { title: t.altitudeGnd, unit: "m" }
-              : { title: t.energy, unit: "m" };
+              : mode === "energy"
+                ? { title: t.energy, unit: "m" }
+                : { title: t.accuracy, unit: "" };
     return { ...meta, breaks };
   }, [mode, track, breaksOverride]);
 

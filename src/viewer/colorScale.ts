@@ -55,6 +55,12 @@ export function colorScaleFor(track: TrackData, mode: ColorMode): ColorScale {
     const values = track.points.energy_height_m;
     return { values, breaks: computeQuantileBreaks(values).breaks };
   }
+  if (mode === "accuracy") {
+    // HDOP (Horizontal Dilution of Precision) – GPS-Genauigkeit.
+    // Einheitenlos; niedriger = besser. Quantil-entzerrte Färbung.
+    const values = track.points.hdop;
+    return { values, breaks: computeQuantileBreaks(values).breaks };
+  }
   // speed (Default; flight/drone/accel werden vom Aufrufer separat behandelt
   // bzw. fallen hier bewusst auf die Speed-Skala zurueck).
   return { values: track.points.speed_kmh, breaks: track.quantile_breaks.speed_kmh };

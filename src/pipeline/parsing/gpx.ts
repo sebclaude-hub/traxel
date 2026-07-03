@@ -81,6 +81,7 @@ export function parseGpx(xml: string): RawTrackPoint[] {
           altM: parseFloatOrNull(trkpt.ele),
           speedKmh,
           speedKnots,
+          hdop: null,
         });
       }
     }

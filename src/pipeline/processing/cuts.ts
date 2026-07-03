@@ -218,6 +218,7 @@ export function applyCuts(
   const lon = pick(p.lon);
   const alt = pick(p.alt);
   const speed = pick(p.speed_kmh);
+  const hdop = pick(p.hdop);
   const timestampMs = idx.map((i) => p.timestamp_ms[i] - Math.round(shiftAfterS[i] * 1000));
 
   const speedQ = computeQuantileBreaks(speed, DEFAULT_QUANTILES);
@@ -238,6 +239,7 @@ export function applyCuts(
     timestamp_ms: timestampMs,
     speed_q_idx: speedQ.qIdx,
     alt_q_idx: altQ.qIdx,
+    hdop,
     is_bridged: idx.map((i) => isBridged[i]),
     ...kin,
   };

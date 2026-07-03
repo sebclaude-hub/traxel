@@ -166,27 +166,24 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
       : colorMode === "altitude_gnd"
         ? "altitude"
         : colorMode;
-
-  const colorOptions: [ColorMode, string][] = dem
-    ? [
-        ["speed", "Tempo"],
-        ["altitude", "Höhe MSL"],
-        ["altitude_gnd", "Höhe GND"],
-        ["flight", "Flug"],
-        ["drone", "Drohne"],
-        ["speed3d", "v₃D"],
-        ["accel", "Beschl."],
-        ["energy", "Spez. Energie"],
-        ["energy_rate", "Energierate"],
-      ]
-    : [
-        ["speed", "Geschwindigkeit"],
-        ["altitude", "Höhe MSL"],
-        ["speed3d", "v₃D"],
-        ["accel", "Beschl."],
-        ["energy", "Spez. Energie"],
-        ["energy_rate", "Energierate"],
-      ];
+  const colorOptions: [ColorMode, string][] = [
+    ["speed", dem ? "Tempo" : "Geschwindigkeit"],
+    ["altitude", "Höhe MSL"],
+    ...(dem
+      ? ([
+          ["altitude_gnd", "Höhe GND"],
+          ["flight", "Flug"],
+          ["drone", "Drohne"],
+        ] as [ColorMode, string][])
+      : []),
+    ["speed3d", "v₃D"],
+    ["accel", "Beschl."],
+    ["energy", "Spez. Energie"],
+    ["energy_rate", "Energierate"],
+    ...(displayTrack.meta.has_satellites
+      ? ([["accuracy", "HDOP"]] as [ColorMode, string][])
+      : []),
+  ];
 
   const m = displayTrack.meta;
   const km = (m.total_distance_m / 1000).toFixed(1);

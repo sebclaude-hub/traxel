@@ -48,6 +48,9 @@ describe("parseNmeaMessages + messagesToTrack", () => {
     expect(track[0].speedKnots).toBeCloseTo(10.0, 2);
     // Zeit aus RMC-Datum + Zeit.
     expect(track[0].timestampMs).toBe(Date.UTC(2024, 5, 1, 12, 0, 0, 0));
+    // HDOP aus GGA-Sätzen.
+    expect(track[0].hdop).toBe(0.9);
+    expect(track[1].hdop).toBe(0.9);
   });
 
   it("verwirft Punkte vor dem ersten gueltigen RMC-Fix (status A)", () => {
@@ -73,5 +76,37 @@ describe("parseNmeaMessages + messagesToTrack", () => {
     ].join("\n");
     const track = messagesToTrack(parseNmeaMessages(lines));
     expect(track).toHaveLength(1);
+  });
+
+  it("extrahiert HDOP aus GGA-Saetzen", () => {
+    const lines = [
+      nmea(["GPRMC", "120000.00", "A", "0000.000", "N", "00000.000", "E", "10.0", "90.0", "010624", "", ""]),
+      nmea(["GPGGA", "120000.00", "0000.000", "N", "00000.000", "E", "1", "08", "1.5", "100.0", "M", "0.0", "M", "", ""]),
+    ].join("\n");
+    const track = messagesToTrack(parseNmeaMessages(lines));
+    expect(track).toHaveLength(1);
+    expect(track[0].hdop).toBe(1.5);
+  });
+
+  it("nimmt Minimum-HDOP bei mehreren GGA pro Timestamp", () => {
+    // Zwei GGA-Saetze pro Timestamp: 2.5 und 1.2 → sollte 1.2 sein
+    const lines = [
+      nmea(["GPRMC", "120000.00", "A", "0000.000", "N", "00000.000", "E", "10.0", "90.0", "010624", "", ""]),
+      nmea(["GPGGA", "120000.00", "0000.000", "N", "00000.000", "E", "1", "08", "2.5", "100.0", "M", "0.0", "M", "", ""]),
+      nmea(["GPGGA", "120000.00", "0000.000", "N", "00000.000", "E", "1", "08", "1.2", "100.0", "M", "0.0", "M", "", ""]),
+    ].join("\n");
+    const track = messagesToTrack(parseNmeaMessages(lines));
+    expect(track).toHaveLength(1);
+    expect(track[0].hdop).toBe(1.2);
+  });
+
+  it("setzt HDOP auf null wenn GGA keine hat", () => {
+    const lines = [
+      nmea(["GPRMC", "120000.00", "A", "0000.000", "N", "00000.000", "E", "10.0", "90.0", "010624", "", ""]),
+      nmea(["GPGGA", "120000.00", "0000.000", "N", "00000.000", "E", "1", "08", "", "100.0", "M", "0.0", "M", "", ""]),
+    ].join("\n");
+    const track = messagesToTrack(parseNmeaMessages(lines));
+    expect(track).toHaveLength(1);
+    expect(track[0].hdop).toBeNull();
   });
 });

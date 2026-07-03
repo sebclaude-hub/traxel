@@ -62,6 +62,7 @@ export function buildTrackData(
   const alt = points.map((p) => roundN(p.altM, 1));
   const speed = points.map((p) => roundN(p.speedKmh, 2));
   const distance = points.map((p) => roundN(p.distanceM, 1));
+  const hdop = points.map((p) => roundN(p.hdop, 1));
   const timestampMs = points.map((p) => p.timestampMs);
 
   const speedQ = computeQuantileBreaks(speed, nQuantiles);
@@ -82,6 +83,7 @@ export function buildTrackData(
     timestamp_ms: timestampMs,
     speed_q_idx: speedQ.qIdx,
     alt_q_idx: altQ.qIdx,
+    hdop,
     ...kin,
   };
 

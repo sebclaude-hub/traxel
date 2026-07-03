@@ -10,6 +10,7 @@ function pt(over: Partial<RawTrackPoint> & { timestampMs: number }): RawTrackPoi
     altM: null,
     speedKmh: null,
     speedKnots: null,
+    hdop: null,
     ...over,
   };
 }

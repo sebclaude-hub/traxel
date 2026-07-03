@@ -116,6 +116,26 @@ export function HelpModal({ onClose }: Props) {
             </p>
           </Section>
         </div>
+
+          <Section title="GPS-Genauigkeit (HDOP)">
+            <p style={pStyle}>
+              HDOP (Horizontal Dilution of Precision) ist ein dimensionsloses Maß für die
+              räumliche Anordnung der sichtbaren Satelliten relativ zum Empfänger.
+              Es bestimmt, wie stark die Satellitenkonstellation die Genauigkeit der
+              horizontalen Position verstärkt oder verschlechtert. Niedrigere Werte bedeuten
+              bessere Genauigkeit; typische Werte liegen zwischen 0,5 und 50.
+            </p>
+            <ul style={ulStyle}>
+              <li><b>0,5–2,0</b>: Exzellent (ideale Satellitenkonstellation)</li>
+              <li><b>2,0–5,0</b>: Gut (normal guter GPS-Empfang)</li>
+              <li><b>5,0–10,0</b>: Moderat (z.B. urbane Gegend, Bäume, Gebäude)</li>
+              <li><b>{">"} 10,0</b>: Schlecht (Tunnels, tiefe Schluchten, Heavy Multipath)</li>
+            </ul>
+            <p style={pStyle}>
+              HDOP ist nur in NMEA-Logs verfügbar, da GPS-Geräte die Satellitenkonstellation
+              nicht in GPX/KML exportieren.
+            </p>
+          </Section>
       </div>
     </div>
   );

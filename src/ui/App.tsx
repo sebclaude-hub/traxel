@@ -734,27 +734,25 @@ export default function App() {
   );
   // "Beschl." (3D-Tangentialbeschleunigung) braucht kein Terrain → in beiden
   // Listen. "Höhe GND" (über Grund) nur mit Terrain; "Höhe MSL" immer.
-  const colorOptions: [ColorMode, string][] = activeDem
-    ? [
-        ["speed", "Tempo"],
-        ["altitude", "Höhe MSL"],
-        ["altitude_gnd", "Höhe GND"],
-        ["flight", "Flug"],
-        ["drone", "Drohne"],
-        ["speed3d", "v₃D"],
-        ["accel", "Beschl."],
-        ["energy", "Spez. Energie"],
-        ["energy_rate", "Energierate"],
-      ]
-    : [
-        ["speed", "Geschwindigkeit"],
-        ["altitude", "Höhe MSL"],
-        ["speed3d", "v₃D"],
-        ["accel", "Beschl."],
-        ["energy", "Spez. Energie"],
-        ["energy_rate", "Energierate"],
-      ];
-
+  // "GPS-Genauigkeit" (accuracy/HDOP) nur bei NMEA-Logs mit Satellitendata.
+  const colorOptions: [ColorMode, string][] = [
+    ["speed", activeDem ? "Tempo" : "Geschwindigkeit"],
+    ["altitude", "Höhe MSL"],
+    ...(activeDem
+      ? ([
+          ["altitude_gnd", "Höhe GND"],
+          ["flight", "Flug"],
+          ["drone", "Drohne"],
+        ] as [ColorMode, string][])
+      : []),
+    ["speed3d", "v₃D"],
+    ["accel", "Beschl."],
+    ["energy", "Spez. Energie"],
+    ["energy_rate", "Energierate"],
+    ...(displayTrack?.meta.has_satellites
+      ? ([["accuracy", "HDOP"]] as [ColorMode, string][])
+      : []),
+  ];
   return (
     <div
       style={rootStyle}
