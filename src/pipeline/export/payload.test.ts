@@ -33,8 +33,6 @@ function makeTrack(n = 5): TrackData {
       speed_kmh: Array.from({ length: n }, () => 40),
       distance_m: Array.from({ length: n }, () => 100),
       timestamp_ms: Array.from({ length: n }, (_, i) => i * 1000),
-      speed_q_idx: Array.from({ length: n }, () => 0),
-      alt_q_idx: Array.from({ length: n }, () => 0),
       is_bridged: Array.from({ length: n }, () => false),
       hdop: Array.from({ length: n }, (_, i) => 1 + i * 0.1),
       ...enrichKinematics({

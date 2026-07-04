@@ -237,8 +237,6 @@ export function applyCuts(
     speed_kmh: speed,
     distance_m: pick(p.distance_m),
     timestamp_ms: timestampMs,
-    speed_q_idx: speedQ.qIdx,
-    alt_q_idx: altQ.qIdx,
     hdop,
     is_bridged: idx.map((i) => isBridged[i]),
     ...kin,

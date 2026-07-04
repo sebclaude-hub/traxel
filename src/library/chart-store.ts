@@ -9,7 +9,8 @@
 
 import { bboxIntersects } from "./spatial";
 import { sha256Hex } from "./hash";
-import { deleteChart, getAllCharts, putChart, type ChartRecord } from "./db";
+import { deleteChart, getAllCharts, getChart, putChart, type ChartRecord } from "./db";
+import { opfsDirectory } from "./opfs";
 import type { TrackBounds } from "../types";
 
 const CHART_DIR = "traxel-charts";
@@ -23,19 +24,7 @@ function chartFileName(hash: string): string {
   return `${hash}.png`;
 }
 
-async function getChartDir(): Promise<FileSystemDirectoryHandle | null> {
-  if (typeof navigator === "undefined") return null;
-  const storage = navigator.storage as
-    | (StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> })
-    | undefined;
-  if (!storage?.getDirectory) return null;
-  try {
-    const root = await storage.getDirectory();
-    return await root.getDirectoryHandle(CHART_DIR, { create: true });
-  } catch {
-    return null;
-  }
-}
+const getChartDir = () => opfsDirectory(CHART_DIR);
 
 async function readChartBytes(hash: string): Promise<ArrayBuffer | null> {
   const dir = await getChartDir();
@@ -68,9 +57,8 @@ export async function saveChart(rec: ChartRecord, bytes: ArrayBuffer): Promise<v
 }
 
 /** Liest einen einzelnen Record (für Hash-Treffer beim Import). null wenn nicht vorhanden. */
-export async function getChartRecord(hash: string): Promise<ChartRecord | null> {
-  const all = await getAllCharts();
-  return all.find((r) => r.hash === hash) ?? null;
+export function getChartRecord(hash: string): Promise<ChartRecord | null> {
+  return getChart(hash);
 }
 
 /**

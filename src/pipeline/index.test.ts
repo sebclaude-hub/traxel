@@ -49,8 +49,7 @@ describe("processGpx", () => {
       p.speed_kmh,
       p.distance_m,
       p.timestamp_ms,
-      p.speed_q_idx,
-      p.alt_q_idx,
+      p.hdop,
     ]) {
       expect(arr).toHaveLength(n);
     }

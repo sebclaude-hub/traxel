@@ -72,10 +72,6 @@ export interface TrackPoints {
   speed_kmh: (number | null)[];
   distance_m: (number | null)[];
   timestamp_ms: number[];
-  /** Quantilklasse 0..n-1 der Geschwindigkeit pro Punkt; -1 = ohne Wert. */
-  speed_q_idx: number[];
-  /** Quantilklasse 0..n-1 der Hoehe pro Punkt; -1 = ohne Wert. */
-  alt_q_idx: number[];
   // --- Abgeleitete Kinematik (Pipeline rechnet, Viewer mappt nur auf Farbe) ---
   // In der Pipeline vorberechnet (buildTrackData) und bei Cuts neu gerechnet
   // (applyCuts) — NICHT bloss mitgeschnitten. Im Share-Payload gestrippt und beim

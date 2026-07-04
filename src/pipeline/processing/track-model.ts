@@ -81,8 +81,6 @@ export function buildTrackData(
     speed_kmh: speed,
     distance_m: distance,
     timestamp_ms: timestampMs,
-    speed_q_idx: speedQ.qIdx,
-    alt_q_idx: altQ.qIdx,
     hdop,
     ...kin,
   };

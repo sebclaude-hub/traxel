@@ -39,7 +39,7 @@ import {
   type AccelDecomp,
 } from "../pipeline/processing/kinematics";
 import { colorScaleFor, combinedBreaks } from "./colorScale";
-import { formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
+import { escapeHtml, formatAltitude, formatSpeed, formatTimestamp } from "./formatters";
 
 export interface PlacedChart {
   overlay: ChartOverlay;
@@ -483,7 +483,9 @@ export function TrackViewer({
       // (Energie, Beschleunigungsvektor) haengen nur dann an.
       const lines: string[] = [];
       // Bei mehreren Tracks: Trackname als erste Zeile zur Zuordnung.
-      if (tracks.length > 1) lines.push(`<b>${track.meta.name}</b>`);
+      // Escapen: der Name stammt aus dem Dateinamen bzw. — im Share-Viewer —
+      // aus einem FREMDEN Payload und landet hier via innerHTML.
+      if (tracks.length > 1) lines.push(`<b>${escapeHtml(track.meta.name)}</b>`);
       // Punkt-Index: wird fuer das Cut-Werkzeug gebraucht, daher immer zeigen.
       lines.push(`Punkt ${idx}`);
       if (ts) lines.push(formatTimestamp(ts));

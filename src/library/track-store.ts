@@ -12,7 +12,8 @@
 // ---------------------------------------------------------------------------
 
 import { sha256Hex } from "./hash";
-import { deleteTrack, getAllTracks, putTrack, type TrackRecord } from "./db";
+import { deleteTrack, getAllTracks, getTrack, putTrack, type TrackRecord } from "./db";
+import { opfsDirectory } from "./opfs";
 
 const TRACK_DIR = "traxel-tracks";
 
@@ -25,19 +26,7 @@ function trackFileName(hash: string): string {
   return `${hash}.txt`;
 }
 
-async function getTrackDir(): Promise<FileSystemDirectoryHandle | null> {
-  if (typeof navigator === "undefined") return null;
-  const storage = navigator.storage as
-    | (StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> })
-    | undefined;
-  if (!storage?.getDirectory) return null;
-  try {
-    const root = await storage.getDirectory();
-    return await root.getDirectoryHandle(TRACK_DIR, { create: true });
-  } catch {
-    return null;
-  }
-}
+const getTrackDir = () => opfsDirectory(TRACK_DIR);
 
 /** Verankert einen Track: Original-Text nach OPFS + Metadaten in IndexedDB. */
 export async function saveTrack(rec: TrackRecord, text: string): Promise<void> {
@@ -61,9 +50,8 @@ export function getAllTrackRecords(): Promise<TrackRecord[]> {
 }
 
 /** Einzelner Record (z.B. fuer Dedupe beim Laden). null wenn nicht vorhanden. */
-export async function getTrackRecord(hash: string): Promise<TrackRecord | null> {
-  const all = await getAllTracks();
-  return all.find((r) => r.hash === hash) ?? null;
+export function getTrackRecord(hash: string): Promise<TrackRecord | null> {
+  return getTrack(hash);
 }
 
 /** Original-Dateitext eines gespeicherten Tracks; null wenn nicht vorhanden. */

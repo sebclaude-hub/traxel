@@ -12,6 +12,7 @@
 // als No-Op: Lesen liefert null, Schreiben tut nichts.
 // ---------------------------------------------------------------------------
 
+import { opfsDirectory } from "../../library/opfs";
 import type { Tile } from "./tiles";
 
 const CACHE_DIR = "traxel-dem-tiles";
@@ -20,19 +21,7 @@ export function tileFileName(t: Tile): string {
   return `terrarium_${t.z}_${t.x}_${t.y}.png`;
 }
 
-async function getCacheDir(): Promise<FileSystemDirectoryHandle | null> {
-  if (typeof navigator === "undefined") return null;
-  const storage = navigator.storage as
-    | (StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> })
-    | undefined;
-  if (!storage?.getDirectory) return null;
-  try {
-    const root = await storage.getDirectory();
-    return await root.getDirectoryHandle(CACHE_DIR, { create: true });
-  } catch {
-    return null;
-  }
-}
+const getCacheDir = () => opfsDirectory(CACHE_DIR);
 
 /** Liest die gecachten PNG-Bytes einer Kachel; null bei Fehlschlag/ohne Cache. */
 export async function readCachedTile(t: Tile): Promise<ArrayBuffer | null> {

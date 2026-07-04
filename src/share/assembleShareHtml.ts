@@ -15,6 +15,8 @@
 // [A-Za-z0-9+/=], also keine HTML-Sonderzeichen.
 // ---------------------------------------------------------------------------
 
+import { escapeHtml } from "../viewer/formatters";
+
 export interface ShareHtmlParts {
   /** Vorgebautes IIFE-Bundle des Share-Viewers (klassisches Script, kein Modul). */
   viewerJs: string;
@@ -22,14 +24,6 @@ export interface ShareHtmlParts {
   payloadB64: string;
   /** Dokumenttitel (i.d.R. Track-Name). */
   title?: string;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 /** Maskiert "</script" (case-insensitiv), damit eingebetteter JS-Code das

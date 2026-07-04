@@ -31,3 +31,17 @@ export function formatTimestamp(ms: number): string {
   const d = new Date(ms);
   return d.toUTCString().replace("GMT", "UTC");
 }
+
+/**
+ * HTML-Sonderzeichen maskieren. Fuer alle Stellen, an denen NUTZERDATEN
+ * (z.B. der Track-Name aus dem Dateinamen oder aus einem fremden
+ * Share-Payload) in per innerHTML gerenderte Strings interpoliert werden —
+ * Tooltip (TrackViewer) und Share-HTML-Titel (assembleShareHtml).
+ */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}

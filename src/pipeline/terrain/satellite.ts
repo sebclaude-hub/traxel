@@ -13,6 +13,7 @@
 // Ausdehnung des Tile-Mosaiks (Grundlage fuer die UV-Berechnung im Viewer).
 // ---------------------------------------------------------------------------
 
+import { opfsDirectory } from "../../library/opfs";
 import type { TrackBounds } from "../../types";
 import { fetchSignal } from "./net";
 import { paddedBounds } from "./stitch";
@@ -40,19 +41,7 @@ const ESRI_URL = (t: Tile) =>
 // OPFS-Cache fuer Satelliten-Kacheln
 // ---------------------------------------------------------------------------
 
-async function getSatCacheDir(): Promise<FileSystemDirectoryHandle | null> {
-  if (typeof navigator === "undefined") return null;
-  const storage = navigator.storage as
-    | (StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> })
-    | undefined;
-  if (!storage?.getDirectory) return null;
-  try {
-    const root = await storage.getDirectory();
-    return await root.getDirectoryHandle(SAT_CACHE_DIR, { create: true });
-  } catch {
-    return null;
-  }
-}
+const getSatCacheDir = () => opfsDirectory(SAT_CACHE_DIR);
 
 function satFileName(t: Tile): string {
   return `sat_${t.z}_${t.x}_${t.y}.bin`;

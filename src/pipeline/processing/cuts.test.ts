@@ -33,8 +33,6 @@ function makeTrack(
       speed_kmh: pts.map((p) => p.speedKmh),
       distance_m: pts.map(() => 100),
       timestamp_ms: pts.map((p) => p.tsS * 1000),
-      speed_q_idx: pts.map(() => -1),
-      alt_q_idx: pts.map(() => -1),
       hdop: pts.map((p) => p.hdop ?? null),
       ...enrichKinematics({
         alt: pts.map(() => 100),

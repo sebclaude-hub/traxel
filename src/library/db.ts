@@ -116,6 +116,22 @@ async function getAllRecords<T>(store: string): Promise<T[]> {
   }
 }
 
+async function getRecord<T>(store: string, key: string): Promise<T | null> {
+  const db = await openDb();
+  if (!db) return null;
+  try {
+    const tx = db.transaction(store, "readonly");
+    const result = await reqToPromise(
+      tx.objectStore(store).get(key) as IDBRequest<T | undefined>,
+    );
+    return result ?? null;
+  } catch {
+    return null;
+  } finally {
+    db.close();
+  }
+}
+
 async function deleteRecord(store: string, key: string): Promise<void> {
   const db = await openDb();
   if (!db) return;
@@ -135,6 +151,9 @@ async function deleteRecord(store: string, key: string): Promise<void> {
 export const putChart = (rec: ChartRecord): Promise<void> => putRecord(CHARTS_STORE, rec);
 /** Alle gespeicherten Chart-Records. [] ohne IndexedDB oder bei Fehler. */
 export const getAllCharts = (): Promise<ChartRecord[]> => getAllRecords(CHARTS_STORE);
+/** Chart-Record per Key-Lookup (hash). null wenn nicht vorhanden / ohne IndexedDB. */
+export const getChart = (hash: string): Promise<ChartRecord | null> =>
+  getRecord(CHARTS_STORE, hash);
 /** Loescht den Chart-Record mit diesem hash. No-Op ohne IndexedDB. */
 export const deleteChart = (hash: string): Promise<void> => deleteRecord(CHARTS_STORE, hash);
 
@@ -142,5 +161,8 @@ export const deleteChart = (hash: string): Promise<void> => deleteRecord(CHARTS_
 export const putTrack = (rec: TrackRecord): Promise<void> => putRecord(TRACKS_STORE, rec);
 /** Alle gespeicherten Track-Records. [] ohne IndexedDB oder bei Fehler. */
 export const getAllTracks = (): Promise<TrackRecord[]> => getAllRecords(TRACKS_STORE);
+/** Track-Record per Key-Lookup (hash). null wenn nicht vorhanden / ohne IndexedDB. */
+export const getTrack = (hash: string): Promise<TrackRecord | null> =>
+  getRecord(TRACKS_STORE, hash);
 /** Loescht den Track-Record mit diesem hash. No-Op ohne IndexedDB. */
 export const deleteTrack = (hash: string): Promise<void> => deleteRecord(TRACKS_STORE, hash);
