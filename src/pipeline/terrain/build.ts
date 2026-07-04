@@ -9,7 +9,7 @@
 
 import type { DemGrid, TrackBounds } from "../../types";
 import { paddedBounds, stitchTiles } from "./stitch";
-import { fetchTerrariumTile } from "./terrarium";
+import { type DecodedTile, fetchTerrariumTile } from "./terrarium";
 import { chooseZoom, tilesForBounds } from "./tiles";
 
 export interface BuildTerrainOptions {
@@ -29,9 +29,11 @@ export async function buildTerrain(
     targetMetersPerPixel: opts.targetMetersPerPixel ?? 30,
   });
   const tiles = tilesForBounds(padded, z);
-  const decoded = await Promise.all(
-    tiles.map((t) => fetchTerrariumTile(t, opts.signal)),
-  );
+  // Ausgefallene Kacheln (null) verwerfen; der Stitcher fuellt die Luecken mit 0.
+  // So kippt eine einzelne verlorene Kachel nicht den ganzen DEM-Aufbau.
+  const decoded = (
+    await Promise.all(tiles.map((t) => fetchTerrariumTile(t, opts.signal)))
+  ).filter((t): t is DecodedTile => t !== null);
   return stitchTiles(decoded, {
     crop: padded,
     maxPixelsPerAxis: opts.maxPixelsPerAxis ?? 600,

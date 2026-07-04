@@ -57,6 +57,23 @@ describe("stitchTiles", () => {
     expect(grid.elevations[grid.n_cols - 1] as number).toBeCloseTo(20, 5); // Ostkante
   });
 
+  it("toleriert eine fehlende Innen-Kachel im Mosaik (Luecke = 0, kein Wurf)", () => {
+    // Drei benachbarte Kacheln (West/Mitte/Ost) waeren die volle Abdeckung; die
+    // MITTE faellt aus (fetchTerrariumTile → null → in build.ts herausgefiltert).
+    // Der Stitcher bekommt nur West+Ost, muss aber ein valides Grid ueber die
+    // gesamte Ausdehnung liefern: Raender = echte Hoehe, das Loch in der Mitte
+    // auf 0 gefuellt (pixelAt trifft keine Kachel → 0), ohne zu werfen.
+    const z = 10, y = 360;
+    const west = makeTile(z, 540, y, 8, () => 30); // Mitte 541 fehlt
+    const east = makeTile(z, 542, y, 8, () => 30);
+    const grid = stitchTiles([west, east]); // ohne crop → volle Mosaik-Ausdehnung
+    expect(grid.n_cols).toBeGreaterThanOrEqual(3);
+    const mid = Math.floor(grid.n_cols / 2); // liegt in der fehlenden Kachel 541
+    expect(grid.elevations[0] as number).toBeCloseTo(30, 5); // Westkante
+    expect(grid.elevations[grid.n_cols - 1] as number).toBeCloseTo(30, 5); // Ostkante
+    expect(grid.elevations[mid] as number).toBeCloseTo(0, 5); // Luecke in der Mitte
+  });
+
   it("schneidet auf die crop-Bounds zu (innerhalb der Kachel)", () => {
     const z = 10, x = 540, y = 360;
     const tile = makeTile(z, x, y, 16, () => 42);

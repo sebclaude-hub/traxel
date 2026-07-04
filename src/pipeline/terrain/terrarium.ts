@@ -9,6 +9,7 @@
 // daher nur dort lauffaehig.
 // ---------------------------------------------------------------------------
 
+import { fetchSignal } from "./net";
 import { readCachedTile, writeCachedTile } from "./tile-cache";
 import { type Tile, terrariumTileUrl, tileToBounds, type TileBounds } from "./tiles";
 
@@ -43,37 +44,46 @@ export function decodeTerrarium(
  * Laedt und dekodiert eine einzelne terrarium-Kachel.
  * Nutzt den OPFS-Cache (Treffer → kein Netzwerk). Nur im Browser/Worker
  * lauffaehig (createImageBitmap/OffscreenCanvas).
+ *
+ * Gibt bei Netzwerkfehler, Timeout, HTTP-Fehler oder Dekodier-Problem `null`
+ * zurueck (statt zu werfen), damit eine EINZELNE ausgefallene Kachel nicht den
+ * gesamten Terrain-Aufbau kippt — der Stitcher fuellt die Luecke mit 0. Parallel
+ * zur Satelliten-Logik (fetchSatTile).
  */
 export async function fetchTerrariumTile(
   tile: Tile,
   signal?: AbortSignal,
-): Promise<DecodedTile> {
-  let bytes = await readCachedTile(tile);
-  if (!bytes) {
-    const resp = await fetch(terrariumTileUrl(tile), { signal });
-    if (!resp.ok) {
-      throw new Error(
-        `Terrain-Kachel ${tile.z}/${tile.x}/${tile.y}: HTTP ${resp.status}`,
-      );
+): Promise<DecodedTile | null> {
+  try {
+    let bytes = await readCachedTile(tile);
+    if (!bytes) {
+      const resp = await fetch(terrariumTileUrl(tile), { signal: fetchSignal(signal) });
+      if (!resp.ok) return null;
+      bytes = await resp.arrayBuffer();
+      await writeCachedTile(tile, bytes);
     }
-    bytes = await resp.arrayBuffer();
-    await writeCachedTile(tile, bytes);
+    const bitmap = await createImageBitmap(new Blob([bytes]));
+    const { width, height } = bitmap;
+
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      bitmap.close();
+      return null;
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+
+    const img = ctx.getImageData(0, 0, width, height);
+    return {
+      tile,
+      bounds: tileToBounds(tile.z, tile.x, tile.y),
+      width,
+      height,
+      elevations: decodeTerrarium(img.data, width, height),
+    };
+  } catch {
+    // Netzwerkfehler / Timeout / Dekodier-Fehler → Kachel ausfallen lassen.
+    return null;
   }
-  const bitmap = await createImageBitmap(new Blob([bytes]));
-  const { width, height } = bitmap;
-
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) throw new Error("2D-Canvas-Kontext nicht verfuegbar");
-  ctx.drawImage(bitmap, 0, 0);
-  bitmap.close();
-
-  const img = ctx.getImageData(0, 0, width, height);
-  return {
-    tile,
-    bounds: tileToBounds(tile.z, tile.x, tile.y),
-    width,
-    height,
-    elevations: decodeTerrarium(img.data, width, height),
-  };
 }

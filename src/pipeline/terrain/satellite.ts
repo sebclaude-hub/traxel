@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import type { TrackBounds } from "../../types";
+import { fetchSignal } from "./net";
 import { paddedBounds } from "./stitch";
 import { chooseZoom, tilesForBounds, tileToBounds, type Tile } from "./tiles";
 
@@ -101,7 +102,7 @@ async function fetchSatTile(
     }
   }
   try {
-    const res = await fetch(ESRI_URL(t), { signal });
+    const res = await fetch(ESRI_URL(t), { signal: fetchSignal(signal) });
     if (!res.ok) return null;
     const bytes = await res.arrayBuffer();
     void writeSatCache(t, bytes);
