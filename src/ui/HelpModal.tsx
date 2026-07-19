@@ -115,8 +115,6 @@ export function HelpModal({ onClose }: Props) {
               wird — in der Luftfahrt die „spezifische Überschussleistung" Pₛ.
             </p>
           </Section>
-        </div>
-
           <Section title="GPS-Genauigkeit (HDOP)">
             <p style={pStyle}>
               HDOP (Horizontal Dilution of Precision) ist ein dimensionsloses Maß für die
@@ -132,10 +130,20 @@ export function HelpModal({ onClose }: Props) {
               <li><b>{">"} 10,0</b>: Schlecht (Tunnels, tiefe Schluchten, Heavy Multipath)</li>
             </ul>
             <p style={pStyle}>
-              HDOP ist nur in NMEA-Logs verfügbar, da GPS-Geräte die Satellitenkonstellation
-              nicht in GPX/KML exportieren.
+              <b>Faustregel zur Umrechnung in Meter</b>: horizontaler Positionsfehler
+              ≈ HDOP × UERE. Die UERE (User Equivalent Range Error, der mittlere
+              Pseudostrecken-Fehler des Empfängers) liegt bei Einfrequenz-GPS ohne
+              Korrektur bei etwa 3–5 m, mit SBAS-Korrektur (EGNOS/WAAS) bei etwa 1 m.
+              Beispiel: HDOP 1,2 × 4 m ≈ 5 m typischer Fehler (1σ); der
+              95-%-Fehler ist etwa doppelt so groß.
+            </p>
+            <p style={pStyle}>
+              HDOP steht in NMEA-Logs (GGA-Sätze) und in GPX-Dateien mit
+              <b> {"<hdop>"}</b>-Element zur Verfügung; KML und IGC exportieren keine
+              Genauigkeitsdaten.
             </p>
           </Section>
+        </div>
       </div>
     </div>
   );

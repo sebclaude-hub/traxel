@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ColorMode, DemGrid, SatelliteData, TrackData } from "../types";
-import { applyCuts, type CutSpec } from "../pipeline";
+import { applyCuts, buildGpx, mergeTracks, type CutSpec, type JoinMode } from "../pipeline";
 import { HelpModal } from "./HelpModal";
 import { RangeSelector } from "./RangeSelector";
 import { useRangeSelection } from "./useRangeSelection";
@@ -30,6 +30,7 @@ import {
 } from "../library/track-store";
 import type { ChartRecord } from "../library/db";
 import { LibraryPanel } from "./LibraryPanel";
+import { MergeDialog } from "./MergeDialog";
 import { ColorLegend } from "./ColorLegend";
 import { SkyPlot } from "../viewer/SkyPlot";
 import { formatDistance, formatDuration, formatSpeed, formatTimestamp } from "../viewer/formatters";
@@ -117,6 +118,8 @@ export default function App() {
   // gemeinsame Kamera, gemeinsame Farbskala). Roh geladen — ohne eigene Cuts in
   // dieser Ausbaustufe. Ein Wechsel des Haupttracks verwirft den Vergleich.
   const [compareTrack, setCompareTrack] = useState<TrackData | null>(null);
+  // Merge-Dialog (Vergleichstracks zusammenfuegen) sichtbar?
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -286,8 +289,10 @@ export default function App() {
     setSatelliteState("idle");
   }, [clearAllRanges]);
 
+  // Liefert true, wenn der Track geladen (und in der Bibliothek gemerkt) wurde
+  // — der Merge-Workflow zeigt nur dann seinen Erfolgs-Toast.
   const handleFile = useCallback(
-    async (file: File) => {
+    async (file: File): Promise<boolean> => {
       setLoading(true);
       setError(null);
       try {
@@ -297,6 +302,7 @@ export default function App() {
           setError("Keine gueltigen Trackpunkte in der Datei.");
           setTrack(null);
           setSatellites(null);
+          return false;
         } else {
           applyLoadedTrack(td, sat);
           // Track automatisch in der Bibliothek merken (Recents, Dedupe per Hash).
@@ -318,15 +324,43 @@ export default function App() {
             text,
           );
         }
+        return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setTrack(null);
         setSatellites(null);
+        return false;
       } finally {
         setLoading(false);
       }
     },
     [loadTrackText, applyLoadedTrack],
+  );
+
+  // Haupt- und Vergleichstrack zu einem neuen Track zusammenfuegen: Punkte
+  // mergen (merge.ts) → als GPX serialisieren → wie einen normalen Datei-Import
+  // durch handleFile schicken (speichert in der Bibliothek, oeffnet den Track
+  // und beendet den Vergleich via applyLoadedTrack).
+  const handleMerge = useCallback(
+    (first: TrackData, second: TrackData, mode: JoinMode) => {
+      setMergeOpen(false);
+      const { segments, effectiveMode, shiftS } = mergeTracks(first, second, mode);
+      const name = `${first.meta.name}+${second.meta.name}`;
+      const gpxText = buildGpx(segments, name);
+      const fileName = `${name.replace(/[/\\:*?"<>|]/g, "_")}.gpx`;
+      const file = new File([gpxText], fileName, { type: "application/gpx+xml" });
+      void handleFile(file).then((ok) => {
+        if (!ok) return; // Fehler steht bereits im error-State
+        const shiftNote =
+          effectiveMode === "bridge"
+            ? ` Zeitstempel des zweiten Tracks um ${Math.round(Math.abs(shiftS))} s ${
+                shiftS >= 0 ? "vorgezogen" : "nach hinten verschoben"
+              }.`
+            : "";
+        setToast(`Zusammengefügt und als „${fileName}" in der Bibliothek gespeichert.${shiftNote}`);
+      });
+    },
+    [handleFile],
   );
 
   // Track aus der Bibliothek wiederoeffnen: gespeicherten Text durch dieselbe
@@ -732,9 +766,15 @@ export default function App() {
     () => (viewTracks.length > 1 ? combinedBreaks(viewTracks, effColorMode) : undefined),
     [viewTracks, effColorMode],
   );
+  // "GPS-Genauigkeit" (accuracy) nur anbieten, wenn der Track HDOP-Werte hat —
+  // NMEA-Logs mit GGA-Sätzen ODER GPX mit <hdop>-Elementen (memoisiert: der
+  // O(n)-Scan soll nicht bei jedem Playback-Tick laufen).
+  const hasAccuracy = useMemo(
+    () => Boolean(displayTrack?.points.hdop.some((v) => v !== null)),
+    [displayTrack],
+  );
   // "Beschl." (3D-Tangentialbeschleunigung) braucht kein Terrain → in beiden
   // Listen. "Höhe GND" (über Grund) nur mit Terrain; "Höhe MSL" immer.
-  // "GPS-Genauigkeit" (accuracy/HDOP) nur bei NMEA-Logs mit Satellitendata.
   const colorOptions: [ColorMode, string][] = [
     ["speed", activeDem ? "Tempo" : "Geschwindigkeit"],
     ["altitude", "Höhe MSL"],
@@ -749,9 +789,7 @@ export default function App() {
     ["accel", "Beschl."],
     ["energy", "Spez. Energie"],
     ["energy_rate", "Energierate"],
-    ...(displayTrack?.meta.has_satellites
-      ? ([["accuracy", "HDOP"]] as [ColorMode, string][])
-      : []),
+    ...(hasAccuracy ? ([["accuracy", "HDOP"]] as [ColorMode, string][]) : []),
   ];
   return (
     <div
@@ -801,6 +839,13 @@ export default function App() {
               title="Vergleichstrack (Overlay)"
             >
               ⇄ {compareTrack.meta.name}
+              <button
+                style={{ ...btnStyle, padding: "0 5px", fontSize: 11 }}
+                onClick={() => setMergeOpen(true)}
+                title="Beide Tracks zu einem neuen Track zusammenfügen (wird als GPX in der Bibliothek gespeichert)"
+              >
+                ⧉ Zusammenfügen…
+              </button>
               <button
                 style={{ ...btnStyle, padding: "0 5px", fontSize: 11 }}
                 onClick={() => setCompareTrack(null)}
@@ -1151,6 +1196,16 @@ export default function App() {
       )}
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+
+      {/* Merge: aus dem angezeigten Haupttrack (inkl. Cuts) + Vergleichstrack. */}
+      {mergeOpen && displayTrack && compareTrack && (
+        <MergeDialog
+          a={displayTrack}
+          b={compareTrack}
+          onCancel={() => setMergeOpen(false)}
+          onConfirm={handleMerge}
+        />
+      )}
 
       {toast && (
         <div

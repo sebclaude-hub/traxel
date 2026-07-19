@@ -90,9 +90,14 @@ export interface TrackPoints {
    *  (Ueberbruecken) nach vorne verschoben wurde (Pro-Punkt-Hinweis).
    *  Fehlt = ueberall false. */
   is_bridged?: boolean[];
-  /** Horizontale Dilution of Precision (HDOP) aus GGA-Sätzen, einheitenlos.
-   *  Nur in NMEA-Logs verfügbar; bei anderen Formaten null.
-   *  Typische Werte: 0.8-2.0 = gut, 2.0-5.0 = moderat, >5.0 = schlecht. */
+  /** Horizontale Dilution of Precision (HDOP), einheitenlos. Quellen:
+   *  NMEA-GGA-Sätze und GPX-<hdop>; bei KML/IGC null.
+   *  Typische Werte: 0.8-2.0 = gut, 2.0-5.0 = moderat, >5.0 = schlecht.
+   *  Umrechnung in Meter (Faustregel): horizontaler Positionsfehler
+   *  ≈ HDOP × UERE. UERE (User Equivalent Range Error, mittlerer
+   *  Pseudostrecken-Fehler) ≈ 3-5 m fuer Einfrequenz-GPS ohne Korrektur,
+   *  ≈ 1 m mit SBAS (EGNOS/WAAS). Beispiel: HDOP 1.2 → ca. 4-6 m (1σ);
+   *  der 95%-Fehler ist etwa doppelt so gross. */
   hdop: (number | null)[];
 }
 

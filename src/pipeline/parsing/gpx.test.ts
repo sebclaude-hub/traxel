@@ -39,6 +39,13 @@ describe("parseGpx", () => {
     expect(out[0].speedKmh).toBeCloseTo(18, 6);
   });
 
+  it("liest <hdop>", () => {
+    const out = parseGpx(
+      gpx(`<trkpt lat="0" lon="0"><time>2024-01-01T00:00:00Z</time><hdop>1.4</hdop></trkpt>`),
+    );
+    expect(out[0].hdop).toBe(1.4);
+  });
+
   it("setzt fehlende Hoehe und Geschwindigkeit auf null", () => {
     const out = parseGpx(
       gpx(`<trkpt lat="0" lon="0"><time>2024-01-01T00:00:00Z</time></trkpt>`),

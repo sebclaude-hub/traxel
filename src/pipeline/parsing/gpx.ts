@@ -11,6 +11,7 @@
 //         <ele>...</ele>          (Hoehe in m, optional)
 //         <time>...Z</time>       (ISO 8601 UTC)
 //         <speed>...</speed>      (m/s; manche Apps, sonst in <extensions>)
+//         <hdop>...</hdop>        (einheitenlos; viele Logger, optional)
 //     </trkpt>
 //
 // Im Web Worker steht kein DOMParser zur Verfuegung, daher fast-xml-parser
@@ -81,7 +82,7 @@ export function parseGpx(xml: string): RawTrackPoint[] {
           altM: parseFloatOrNull(trkpt.ele),
           speedKmh,
           speedKnots,
-          hdop: null,
+          hdop: parseFloatOrNull(trkpt.hdop),
         });
       }
     }

@@ -23,9 +23,9 @@ export interface RawTrackPoint {
   speedKmh: number | null;
   /** Gemeldete Geschwindigkeit (Knoten) aus der Quelle, oder null. */
   speedKnots: number | null;
-  /** Horizontale Dilution of Precision (HDOP) aus GGA-Sätzen, oder null.
-   *  Typische Werte: 0.8-2.0 gut, 2.0-5.0 moderat, >5.0 schlecht.
-   *  Nur in NMEA-Logs verfügbar. */
+  /** Horizontale Dilution of Precision (HDOP), einheitenlos, oder null.
+   *  Quellen: NMEA-GGA-Sätze und GPX-<hdop>; KML/IGC liefern keine.
+   *  Typische Werte: 0.8-2.0 gut, 2.0-5.0 moderat, >5.0 schlecht. */
   hdop: number | null;
 }
 

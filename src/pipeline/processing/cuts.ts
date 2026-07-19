@@ -70,8 +70,11 @@ function forceEdgeTrim(specs: CutSpec[], n: number): CutSpec[] {
   );
 }
 
-/** Mittlere Geschwindigkeit der n Punkte links und rechts des Cuts. */
-function avgSpeedKmhAround(
+/** Mittlere Geschwindigkeit der n Punkte links von `lo` und rechts von `hi`.
+ *  Auch fuer einen LEEREN Bereich (hi = lo − 1) definiert: dann sind es die
+ *  Nachbarn beidseits einer Nahtstelle — so nutzt merge.ts die Funktion fuer
+ *  die Brueckenzeit zwischen zwei zusammengefuegten Tracks. */
+export function avgSpeedKmhAround(
   speed: (number | null)[],
   lo: number,
   hi: number,

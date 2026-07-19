@@ -155,6 +155,13 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
       .filter((x): x is PlacedChart => x !== null);
   }, [decoded, chartImages]);
 
+  // "GPS-Genauigkeit" (accuracy) nur anbieten, wenn der Track HDOP-Werte hat —
+  // NMEA-Logs mit GGA-Sätzen ODER GPX mit <hdop> (memoisiert, O(n)-Scan).
+  const hasAccuracy = useMemo(
+    () => Boolean(displayTrack?.points.hdop.some((v) => v !== null)),
+    [displayTrack],
+  );
+
   if (error) return <div style={centeredStyle}>Fehler beim Laden: {error}</div>;
   if (!decoded || !displayTrack) return <div style={centeredStyle}>Lädt…</div>;
 
@@ -180,9 +187,7 @@ export function ShareApp({ payloadB64 }: { payloadB64: string }) {
     ["accel", "Beschl."],
     ["energy", "Spez. Energie"],
     ["energy_rate", "Energierate"],
-    ...(displayTrack.meta.has_satellites
-      ? ([["accuracy", "HDOP"]] as [ColorMode, string][])
-      : []),
+    ...(hasAccuracy ? ([["accuracy", "HDOP"]] as [ColorMode, string][]) : []),
   ];
 
   const m = displayTrack.meta;
